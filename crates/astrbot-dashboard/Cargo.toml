@@ -9,6 +9,7 @@ repository = { workspace = true }
 
 [dependencies]
 astrbot-core = { path = "../astrbot-core" }
+astrbot-persona = { path = "../astrbot-persona" }
 axum = { workspace = true }
 tokio = { workspace = true }
 tower = { workspace = true }

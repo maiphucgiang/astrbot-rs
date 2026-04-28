@@ -4,6 +4,7 @@ use axum::{
     extract::{Path, State, Query},
     Json,
 };
+use astrbot_persona::{PersonaManager, CustomPersonaRequest, ReplyStyle};
 use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -20,8 +21,8 @@ pub struct AppState {
     pub platforms: Arc<RwLock<Vec<Value>>>,
     /// 插件列表
     pub plugins: Arc<RwLock<Vec<Value>>>,
-    /// 人格预设列表
-    pub personas: Arc<RwLock<Vec<Value>>>,
+    /// 人格管理器（SQLite 持久化）
+    pub persona_manager: Arc<std::sync::Mutex<PersonaManager>>,
     /// 会话列表
     pub sessions: Arc<RwLock<Vec<Value>>>,
     /// 系统启动时间
@@ -30,12 +31,13 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> Self {
+        let persona_mgr = PersonaManager::new(Some("data/personas.db".to_string()));
         Self {
             config: Arc::new(RwLock::new(json!({}))),
             providers: Arc::new(RwLock::new(vec![])),
             platforms: Arc::new(RwLock::new(vec![])),
             plugins: Arc::new(RwLock::new(vec![])),
-            personas: Arc::new(RwLock::new(vec![])),
+            persona_manager: Arc::new(std::sync::Mutex::new(persona_mgr)),
             sessions: Arc::new(RwLock::new(vec![])),
             start_time: std::time::Instant::now(),
         }
@@ -77,8 +79,9 @@ fn build_router(state: AppState) -> Router {
         .route("/api/plugins/:id/toggle", post(toggle_plugin))
         // 人格预设
         .route("/api/personas", get(list_personas).post(create_persona))
+        .route("/api/personas/active", get(get_active_persona))
         .route("/api/personas/:id", get(get_persona).put(update_persona).delete(delete_persona))
-        .route("/api/personas/:id/toggle", post(toggle_persona))
+        .route("/api/personas/:id/switch", post(toggle_persona))
         // 会话
         .route("/api/sessions", get(list_sessions).delete(delete_all_sessions))
         .route("/api/sessions/:id", get(get_session).delete(delete_session))
@@ -112,7 +115,14 @@ async fn get_detailed_status(State(state): State<AppState>) -> Json<Value> {
     let providers = state.providers.read().await.clone();
     let platforms = state.platforms.read().await.clone();
     let plugins = state.plugins.read().await.clone();
-    let personas = state.personas.read().await.clone();
+    let personas = {
+        let mgr = state.persona_manager.lock().unwrap();
+        mgr.list_personas()
+    };
+    let active_persona = {
+        let mgr = state.persona_manager.lock().unwrap();
+        mgr.get_active_persona()
+    };
     let uptime = state.start_time.elapsed().as_secs();
 
     Json(json!({
@@ -124,6 +134,8 @@ async fn get_detailed_status(State(state): State<AppState>) -> Json<Value> {
         "platforms_count": platforms.len(),
         "plugins_count": plugins.len(),
         "personas_count": personas.len(),
+        "active_persona": active_persona.id,
+        "active_persona_name": active_persona.name,
     }))
 }
 
@@ -275,26 +287,48 @@ async fn toggle_plugin(
 // ========== 人格预设 ==========
 
 async fn list_personas(State(state): State<AppState>) -> Json<Value> {
-    Json(json!({"personas": *state.personas.read().await}))
+    let mgr = state.persona_manager.lock().unwrap();
+    let personas = mgr.list_personas();
+    let persona_jsons: Vec<Value> = personas.into_iter()
+        .map(|p| serde_json::to_value(p).unwrap())
+        .collect();
+    Json(json!({"personas": persona_jsons}))
+}
+
+async fn get_active_persona(State(state): State<AppState>) -> Json<Value> {
+    let mgr = state.persona_manager.lock().unwrap();
+    let persona = mgr.get_active_persona();
+    Json(serde_json::to_value(persona).unwrap())
 }
 
 async fn create_persona(
     State(state): State<AppState>,
     Json(body): Json<Value>,
 ) -> Json<Value> {
-    state.personas.write().await.push(body.clone());
-    Json(json!({"success": true, "created": body}))
+    // Parse CustomPersonaRequest from JSON
+    let req = match parse_custom_persona_request(body) {
+        Ok(r) => r,
+        Err(e) => return Json(json!({"success": false, "error": e})),
+    };
+
+    let mgr = state.persona_manager.lock().unwrap();
+    match mgr.add_custom_persona(req) {
+        Ok(persona) => Json(json!({"success": true, "created": persona})),
+        Err(e) => Json(json!({"success": false, "error": e.to_string()})),
+    }
 }
 
 async fn get_persona(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Json<Value> {
-    let personas = state.personas.read().await;
-    let persona = personas.iter().find(|p| {
-        p.get("id").and_then(|v| v.as_str()) == Some(&id)
-    });
-    Json(persona.cloned().unwrap_or(Value::Null))
+    let mgr = state.persona_manager.lock().unwrap();
+    let personas = mgr.list_personas();
+    let persona = personas.into_iter().find(|p| p.id == id);
+    match persona {
+        Some(p) => Json(serde_json::to_value(p).unwrap()),
+        None => Json(Value::Null),
+    }
 }
 
 async fn update_persona(
@@ -302,38 +336,84 @@ async fn update_persona(
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> Json<Value> {
-    let mut personas = state.personas.write().await;
-    if let Some(idx) = personas.iter().position(|p| {
-        p.get("id").and_then(|v| v.as_str()) == Some(&id)
-    }) {
-        personas[idx] = body;
+    // For update, we remove the old one and add the new one
+    let req = match parse_custom_persona_request(body) {
+        Ok(r) => r,
+        Err(e) => return Json(json!({"success": false, "error": e})),
+    };
+
+    let mgr = state.persona_manager.lock().unwrap();
+    // Remove old if it's custom
+    let _ = mgr.remove_persona(&id);
+    match mgr.add_custom_persona(req) {
+        Ok(persona) => Json(json!({"success": true, "updated": persona})),
+        Err(e) => Json(json!({"success": false, "error": e.to_string()})),
     }
-    Json(json!({"success": true, "updated": id}))
 }
 
 async fn delete_persona(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Json<Value> {
-    let mut personas = state.personas.write().await;
-    personas.retain(|p| p.get("id").and_then(|v| v.as_str()) != Some(&id));
-    Json(json!({"success": true, "deleted": id}))
+    let mgr = state.persona_manager.lock().unwrap();
+    match mgr.remove_persona(&id) {
+        Ok(()) => Json(json!({"success": true, "deleted": id})),
+        Err(e) => Json(json!({"success": false, "error": e.to_string()})),
+    }
 }
 
 async fn toggle_persona(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Json<Value> {
-    let mut personas = state.personas.write().await;
-    if let Some(p) = personas.iter_mut().find(|p| {
-        p.get("id").and_then(|v| v.as_str()) == Some(&id)
-    }) {
-        if let Some(obj) = p.as_object_mut() {
-            let current = obj.get("active").and_then(|v| v.as_bool()).unwrap_or(false);
-            obj.insert("active".to_string(), json!(!current));
-        }
+    let mgr = state.persona_manager.lock().unwrap();
+    match mgr.switch_persona(&id) {
+        Ok(persona) => Json(json!({
+            "success": true,
+            "switched_to": id,
+            "persona": persona
+        })),
+        Err(e) => Json(json!({"success": false, "error": e.to_string()})),
     }
-    Json(json!({"success": true, "toggled": id}))
+}
+
+fn parse_custom_persona_request(body: Value) -> Result<CustomPersonaRequest, String> {
+    let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let description = body.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let tone = body.get("tone").and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    let catchphrases = body.get("catchphrases").and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    let taboos = body.get("taboos").and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    let switch_conditions = body.get("switch_conditions").and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    let system_prompt = body.get("system_prompt").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    
+    let reply_style = body.get("reply_style").and_then(|v| {
+        Some(ReplyStyle {
+            opening_pattern: v.get("opening_pattern").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+            sentence_length: v.get("sentence_length").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+            punctuation_style: v.get("punctuation_style").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+            emoji_usage: v.get("emoji_usage").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+            ending_pattern: v.get("ending_pattern").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+        })
+    }).unwrap_or(ReplyStyle {
+        opening_pattern: "".to_string(),
+        sentence_length: "".to_string(),
+        punctuation_style: "".to_string(),
+        emoji_usage: "".to_string(),
+        ending_pattern: "".to_string(),
+    });
+
+    Ok(CustomPersonaRequest {
+        name, description, tone, catchphrases, taboos,
+        switch_conditions, system_prompt, reply_style,
+    })
 }
 
 // ========== 会话 ==========

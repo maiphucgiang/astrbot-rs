@@ -47,7 +47,7 @@ pub fn validate_url(url: &str) -> Result<()> {
 }
 
 fn is_private_ip(ip: IpAddr) -> bool {
-    PRIVATE_IP_RANGES.iter().any(|(network, prefix)| match (network, ip) {
+    PRIVATE_IP_RANGES.iter().any(|(network, prefix)| match (*network, ip) {
         (IpAddr::V4(n), IpAddr::V4(i)) => is_ipv4_in_prefix(n, i, *prefix),
         (IpAddr::V6(n), IpAddr::V6(i)) => is_ipv6_in_prefix(n, i, *prefix),
         _ => false,
