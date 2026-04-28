@@ -1,0 +1,11 @@
+pub mod moonshot;
+pub mod deepseek;
+pub mod groq;
+pub mod openrouter;
+pub mod siliconflow;
+pub mod oneapi;
+pub mod lmstudio;
+pub mod zhipu;
+pub mod xai;
+pub mod minimax;
+pub mod volcengine;
