@@ -26,6 +26,8 @@ pub struct AppState {
     pub persona_manager: Arc<std::sync::Mutex<PersonaManager>>,
     /// 会话列表
     pub sessions: Arc<RwLock<Vec<Value>>>,
+    /// 日志条目列表（内存中保留最近 1000 条）
+    pub logs: Arc<RwLock<Vec<Value>>>,
     /// 系统启动时间
     pub start_time: std::time::Instant,
 }
@@ -40,6 +42,7 @@ impl AppState {
             plugins: Arc::new(RwLock::new(vec![])),
             persona_manager: Arc::new(std::sync::Mutex::new(persona_mgr)),
             sessions: Arc::new(RwLock::new(vec![])),
+            logs: Arc::new(RwLock::new(vec![])),
             start_time: std::time::Instant::now(),
         }
     }
