@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+pub mod search;
+
 /// 帮助系统：管理所有指令注册与渲染
 pub struct HelpSystem {
     registry: CommandRegistry,
@@ -263,7 +265,13 @@ impl HelpSystem {
         }
     }
 
-    /// 渲染帮助文本
+    /// 搜索命令（模糊匹配）
+    ///
+    /// - `query` 为空 → 返回所有命令名
+    /// - `query` 非空 → 按关键词匹配，返回前 `limit` 条
+    pub fn search_commands(&self, query: &str, limit: usize) -> Vec<search::SearchResult> {
+        search::search_commands(&self.registry, query, limit)
+    }
     pub fn render(&self, scope: HelpScope) -> String {
         match scope {
             HelpScope::Quick => self.render_quick(),
