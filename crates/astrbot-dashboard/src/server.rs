@@ -7,6 +7,7 @@ use axum::{
 use astrbot_persona::{PersonaManager, CustomPersonaRequest, ReplyStyle};
 use astrbot_provider::{ChatProvider, ChatMessage, ChatOptions, ProviderConfig};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -633,16 +634,22 @@ async fn get_session_history(
 
 // ========== 消息历史 ==========
 
-async fn list_history(State(state): State<AppState>) -> Json<Value> {
+async fn list_history(
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Json<Value> {
     let sessions = state.sessions.read().await;
-    let mut messages: Vec<Value> = Vec::new();
-    for session in sessions.iter() {
-        if let Some(msgs) = session.get("messages").and_then(|v| v.as_array()) {
-            messages.extend(msgs.iter().cloned());
-        }
-    }
-    let total = messages.len();
-    Json(json!({"messages": messages, "total": total}))
+    let limit = params.get("limit").and_then(|s| s.parse::<usize>().ok()).unwrap_or(50);
+    let offset = params.get("offset").and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+    let total = sessions.len();
+    let paginated: Vec<Value> = sessions.iter().skip(offset).take(limit).cloned().collect();
+    Json(json!({
+        "sessions": paginated,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + limit < total,
+    }))
 }
 
 async fn get_message(
@@ -696,6 +703,7 @@ async fn update_setting(
 
 // ========== 日志 ==========
 
-async fn get_logs() -> Json<Value> {
-    Json(json!({"logs": [], "note": "Log persistence not yet implemented"}))
+async fn get_logs(State(state): State<AppState>) -> Json<Value> {
+    let logs = state.logs.read().await;
+    Json(json!({"logs": logs.clone(), "count": logs.len(), "max_retained": 1000}))
 }
