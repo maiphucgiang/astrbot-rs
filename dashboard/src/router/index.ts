@@ -26,10 +26,22 @@ const routes = [
     meta: { title: '插件' }
   },
   {
+    path: '/sessions',
+    name: 'Sessions',
+    component: () => import('@/views/Sessions.vue'),
+    meta: { title: '会话管理' }
+  },
+  {
     path: '/history',
     name: 'History',
     component: () => import('@/views/History.vue'),
     meta: { title: '消息历史' }
+  },
+  {
+    path: '/personas',
+    name: 'Personas',
+    component: () => import('@/views/Personas.vue'),
+    meta: { title: '人格预设' }
   },
   {
     path: '/config',
