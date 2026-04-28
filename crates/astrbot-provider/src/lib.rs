@@ -1,3 +1,4 @@
+pub mod client;
 pub mod openai;
 pub mod openai_compatible;
 pub mod sources;

@@ -258,24 +258,23 @@ impl PersonaManager {
         text
     }
 
-    // ========== SQLite 持久化（完整实现）==========
+    // ========== SQLite 持久化（v2 扩展 schema）==========
 
-    fn load_from_db(&self) -> Result<()> {
-        use rusqlite::{Connection, params};
-        use serde_json;
-
-        let path = match &self.db_path {
-            Some(p) => p,
-            None => return Ok(()),
-        };
-
-        let conn = Connection::open(path)?;
-
-        // 创建表（如果不存在）
+    /// v2 schema — 显式列（支持人格编辑器后端）
+    fn init_db_v2(&self, conn: &rusqlite::Connection) -> Result<()> {
         conn.execute(
-            "CREATE TABLE IF NOT EXISTS personas (
+            "CREATE TABLE IF NOT EXISTS personas_v2 (
                 id TEXT PRIMARY KEY,
-                data TEXT NOT NULL
+                name TEXT NOT NULL,
+                description TEXT,
+                system_prompt TEXT NOT NULL,
+                tone TEXT,              -- JSON array
+                catchphrases TEXT,      -- JSON array
+                taboos TEXT,            -- JSON array
+                switch_conditions TEXT, -- JSON array
+                reply_style TEXT,       -- JSON object
+                created_at INTEGER,
+                updated_at INTEGER
             )",
             [],
         )?;
@@ -286,8 +285,20 @@ impl PersonaManager {
             )",
             [],
         )?;
+        Ok(())
+    }
 
-        // 加载所有人格
+    /// 从旧表迁移到 v2（如果旧表存在）
+    fn migrate_from_v1(&self, conn: &rusqlite::Connection) -> Result<()> {
+        let old_exists: i64 = conn.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='personas'",
+            [],
+            |row| row.get(0),
+        )?;
+        if old_exists == 0 {
+            return Ok(());
+        }
+
         let mut stmt = conn.prepare("SELECT id, data FROM personas")?;
         let rows = stmt.query_map([], |row| {
             let id: String = row.get(0)?;
@@ -295,12 +306,91 @@ impl PersonaManager {
             Ok((id, data))
         })?;
 
-        let mut guard = self.personas.lock().unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+
         for row in rows {
             let (id, data) = row?;
-            if let Ok(persona) = serde_json::from_str::<Persona>(&data) {
-                guard.insert(id, persona);
+            if let Ok(p) = serde_json::from_str::<Persona>(&data) {
+                let _ = Self::insert_persona_v2(conn, &p, now);
             }
+        }
+
+        // 旧表功成身退，改名备份
+        conn.execute("ALTER TABLE personas RENAME TO personas_v1_backup", [])?;
+        Ok(())
+    }
+
+    fn insert_persona_v2(conn: &rusqlite::Connection, p: &Persona, now: i64) -> Result<()> {
+        let tone = serde_json::to_string(&p.tone).unwrap_or_else(|_| "[]".into());
+        let catchphrases = serde_json::to_string(&p.catchphrases).unwrap_or_else(|_| "[]".into());
+        let taboos = serde_json::to_string(&p.taboos).unwrap_or_else(|_| "[]".into());
+        let switch_conditions = serde_json::to_string(&p.switch_conditions).unwrap_or_else(|_| "[]".into());
+        let reply_style = serde_json::to_string(&p.reply_style).unwrap_or_else(|_| "{}".into());
+
+        conn.execute(
+            "INSERT OR REPLACE INTO personas_v2
+             (id, name, description, system_prompt, tone, catchphrases, taboos,
+              switch_conditions, reply_style, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![
+                &p.id, &p.name, &p.description, &p.system_prompt,
+                tone, catchphrases, taboos, switch_conditions, reply_style,
+                now, now
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn row_to_persona(row: &rusqlite::Row) -> rusqlite::Result<Persona> {
+        let id: String = row.get(0)?;
+        let name: String = row.get(1)?;
+        let description: String = row.get(2)?;
+        let system_prompt: String = row.get(3)?;
+        let tone_str: String = row.get(4)?;
+        let catchphrases_str: String = row.get(5)?;
+        let taboos_str: String = row.get(6)?;
+        let switch_conditions_str: String = row.get(7)?;
+        let reply_style_str: String = row.get(8)?;
+
+        let tone: Vec<String> = serde_json::from_str(&tone_str).unwrap_or_default();
+        let catchphrases: Vec<String> = serde_json::from_str(&catchphrases_str).unwrap_or_default();
+        let taboos: Vec<String> = serde_json::from_str(&taboos_str).unwrap_or_default();
+        let switch_conditions: Vec<String> = serde_json::from_str(&switch_conditions_str).unwrap_or_default();
+        let reply_style: ReplyStyle = serde_json::from_str(&reply_style_str).unwrap_or_default();
+
+        Ok(Persona {
+            id, name, description, system_prompt,
+            tone, catchphrases, taboos, switch_conditions, reply_style,
+        })
+    }
+
+    fn load_from_db(&self) -> Result<()> {
+        use rusqlite::Connection;
+
+        let path = match &self.db_path {
+            Some(p) => p,
+            None => return Ok(()),
+        };
+
+        let conn = Connection::open(path)?;
+        self.init_db_v2(&conn)?;
+        self.migrate_from_v1(&conn)?;
+
+        // 加载所有人格（v2 表）
+        let mut stmt = conn.prepare(
+            "SELECT id, name, description, system_prompt, tone, catchphrases,
+                    taboos, switch_conditions, reply_style
+             FROM personas_v2"
+        )?;
+        let rows = stmt.query_map([], Self::row_to_persona)?;
+
+        let mut guard = self.personas.lock().unwrap();
+        for row in rows {
+            let persona = row?;
+            guard.insert(persona.id.clone(), persona);
         }
         drop(guard);
 
@@ -319,8 +409,7 @@ impl PersonaManager {
     }
 
     fn save_to_db(&self) -> Result<()> {
-        use rusqlite::{Connection, params};
-        use serde_json;
+        use rusqlite::Connection;
 
         let path = match &self.db_path {
             Some(p) => p,
@@ -328,32 +417,18 @@ impl PersonaManager {
         };
 
         let conn = Connection::open(path)?;
+        self.init_db_v2(&conn)?;
 
-        // 创建表
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS personas (
-                id TEXT PRIMARY KEY,
-                data TEXT NOT NULL
-            )",
-            [],
-        )?;
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS active_persona (
-                key TEXT PRIMARY KEY,
-                persona_id TEXT NOT NULL
-            )",
-            [],
-        )?;
+        // 清空并重新写入所有人格（内置 + 自定义）
+        conn.execute("DELETE FROM personas_v2", [])?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
 
-        // 清空并重新写入所有人格（内置+自定义）
-        conn.execute("DELETE FROM personas", [])?;
         let guard = self.personas.lock().unwrap();
-        for (id, persona) in guard.iter() {
-            let data = serde_json::to_string(persona)?;
-            conn.execute(
-                "INSERT INTO personas (id, data) VALUES (?1, ?2)",
-                params![id, data],
-            )?;
+        for (_, persona) in guard.iter() {
+            let _ = Self::insert_persona_v2(&conn, persona, now);
         }
         drop(guard);
 
@@ -361,10 +436,64 @@ impl PersonaManager {
         let active_id = self.active_id.lock().unwrap().clone();
         conn.execute(
             "INSERT OR REPLACE INTO active_persona (key, persona_id) VALUES ('active', ?1)",
-            params![active_id],
+            rusqlite::params![active_id],
         )?;
 
         Ok(())
+    }
+
+    // ========== 人格编辑器后端 API ==========
+
+    /// 保存单个人格到 DB（编辑器用）
+    pub fn save_persona_to_db(&self, persona: &Persona) -> Result<()> {
+        use rusqlite::Connection;
+
+        let path = match &self.db_path {
+            Some(p) => p,
+            None => bail!("No database path configured"),
+        };
+
+        let conn = Connection::open(path)?;
+        self.init_db_v2(&conn)?;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+
+        // 同时更新内存
+        let mut guard = self.personas.lock().unwrap();
+        guard.insert(persona.id.clone(), persona.clone());
+        drop(guard);
+
+        Self::insert_persona_v2(&conn, persona, now)?;
+        Ok(())
+    }
+
+    /// 从 DB 加载全部人格（编辑器初始化用）
+    pub fn load_all_from_db(&self) -> Result<Vec<Persona>> {
+        use rusqlite::Connection;
+
+        let path = match &self.db_path {
+            Some(p) => p,
+            None => return Ok(vec![]),
+        };
+
+        let conn = Connection::open(path)?;
+        self.init_db_v2(&conn)?;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, name, description, system_prompt, tone, catchphrases,
+                    taboos, switch_conditions, reply_style
+             FROM personas_v2"
+        )?;
+        let rows = stmt.query_map([], Self::row_to_persona)?;
+
+        let mut personas = Vec::new();
+        for row in rows {
+            personas.push(row?);
+        }
+        Ok(personas)
     }
 }
 

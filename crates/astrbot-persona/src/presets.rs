@@ -24,6 +24,18 @@ pub struct ReplyStyle {
     pub ending_pattern: String,
 }
 
+impl Default for ReplyStyle {
+    fn default() -> Self {
+        Self {
+            opening_pattern: "".into(),
+            sentence_length: "短句为主".into(),
+            punctuation_style: "句号".into(),
+            emoji_usage: "偶尔用".into(),
+            ending_pattern: "就这样".into(),
+        }
+    }
+}
+
 /// 人格预设工厂
 pub struct PersonaPresets;
 
