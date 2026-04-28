@@ -6,7 +6,16 @@ use std::sync::{Arc, Mutex};
 use crate::presets::{Persona, PersonaPresets, ReplyStyle};
 use crate::safety::PromptSafety;
 
-/// 人格管理器 - 内存 + SQLite 持久化
+/// 情绪状态
+#[derive(Debug, Clone, PartialEq)]
+pub enum EmotionState {
+    Happy,
+    Angry,
+    Sad,
+    Neutral,
+}
+
+/// 人格管理器 — 内存 + SQLite 持久化
 #[derive(Clone)]
 pub struct PersonaManager {
     /// 所有可用人格（内置 + 用户自定义）
@@ -258,9 +267,93 @@ impl PersonaManager {
         text
     }
 
+    // ========== 人格情绪状态机（自动切换）==========
+
+    /// 检测用户输入情绪
+    fn detect_emotion(&self, text: &str) -> EmotionState {
+        let lower = text.to_lowercase();
+        let text = lower.as_str();
+
+        // 愤怒关键词
+        let angry_keywords = ["生气", "愤怒", "滚", "垃圾", "差", "怒", "fuck", "shit", "angry", "hate", "傻逼", "他妈", "操", "废物", "烂", "坑", "骗", "恶心", "讨厌"];
+        let angry_score = angry_keywords.iter().filter(|&&kw| text.contains(kw)).count();
+
+        // 悲伤关键词
+        let sad_keywords = ["难过", "伤心", "哭", "失望", "惨", "累", "sad", "sorry", "depressed", "难受", "痛苦", "绝望", "孤独", "无助", "迷茫", "失败"];
+        let sad_score = sad_keywords.iter().filter(|&&kw| text.contains(kw)).count();
+
+        // 开心关键词
+        let happy_keywords = ["开心", "高兴", "谢谢", "哈哈", "棒", "好", "不错", "喜欢", "love", "happy", "great", "爽", "赞", "牛逼", "厉害", "成功", "完美", "舒服", "爱你"];
+        let happy_score = happy_keywords.iter().filter(|&&kw| text.contains(kw)).count();
+
+        // 选择最高分情绪
+        let scores = [(EmotionState::Angry, angry_score), (EmotionState::Sad, sad_score), (EmotionState::Happy, happy_score)];
+        let max = scores.iter().max_by_key(|(_, s)| *s).unwrap();
+        if max.1 > 0 { max.0.clone() } else { EmotionState::Neutral }
+    }
+
+    /// 根据对话上下文自动切换人格
+    /// 返回：是否发生了切换，以及切换后的人格 ID
+    pub fn auto_switch_by_context(&self, user_input: &str) -> Result<(bool, String)> {
+        let emotion = self.detect_emotion(user_input);
+        let current = self.get_active_persona();
+
+        // 检查当前人格的 switch_conditions 是否匹配
+        let target_id = self.match_switch_condition(&current, &emotion, user_input);
+
+        match target_id {
+            Some(id) if id != current.id => {
+                let switched = self.switch_persona(&id)?;
+                Ok((true, switched.id))
+            }
+            _ => Ok((false, current.id)),
+        }
+    }
+
+    /// 根据情绪和 switch_conditions 匹配目标人格
+    fn match_switch_condition(&self, current: &Persona, emotion: &EmotionState, _input: &str) -> Option<String> {
+        // 1. 先检查当前人格自己的 switch_conditions
+        for cond in &current.switch_conditions {
+            let cond_lower = cond.to_lowercase();
+            match emotion {
+                EmotionState::Happy if cond_lower.contains("沙雕") || cond_lower.contains("搞笑") || cond_lower.contains("emoji") => {
+                    return self.find_persona_by_keyword("沙雕搞笑");
+                }
+                EmotionState::Angry if cond_lower.contains("毒舌") || cond_lower.contains("吐槽") || cond_lower.contains("强烈情绪") => {
+                    return self.find_persona_by_keyword("毒舌");
+                }
+                EmotionState::Sad if cond_lower.contains("温柔") || cond_lower.contains("安慰") || cond_lower.contains("情绪") => {
+                    return self.find_persona_by_keyword("温柔");
+                }
+                _ => {}
+            }
+        }
+
+        // 2. 默认情绪-人格映射
+        match emotion {
+            EmotionState::Happy => self.find_persona_by_keyword("沙雕搞笑"),
+            EmotionState::Angry => self.find_persona_by_keyword("毒舌"),
+            EmotionState::Sad => self.find_persona_by_keyword("温柔"),
+            EmotionState::Neutral => None,
+        }
+    }
+
+    /// 按关键词搜索人格
+    fn find_persona_by_keyword(&self, keyword: &str) -> Option<String> {
+        let guard = self.personas.lock().unwrap();
+        for (id, persona) in guard.iter() {
+            let combined = format!("{} {} {} {}
+            , persona.name, persona.description, persona.system_prompt, persona.tone.join(" "));
+            if combined.contains(keyword) {
+                return Some(id.clone());
+            }
+        }
+        None
+    }
+
     // ========== SQLite 持久化（v2 扩展 schema）==========
 
-    /// v2 schema — 显式列（支持人格编辑器后端）
+    /// v2 schema - 显式列（支持人格编辑器后端）
     fn init_db_v2(&self, conn: &rusqlite::Connection) -> Result<()> {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS personas_v2 (
@@ -614,5 +707,40 @@ mod tests {
         };
         let custom = mgr.add_custom_persona(req).unwrap();
         assert!(mgr.remove_persona(&custom.id).is_ok());
+    }
+
+    #[test]
+    fn test_detect_emotion() {
+        let mgr = test_manager();
+
+        assert_eq!(mgr.detect_emotion("今天好开心啊哈哈"), EmotionState::Happy);
+        assert_eq!(mgr.detect_emotion("什么垃圾东西，气死我了"), EmotionState::Angry);
+        assert_eq!(mgr.detect_emotion("好难过，心里很难受"), EmotionState::Sad);
+        assert_eq!(mgr.detect_emotion("请帮我查一下天气"), EmotionState::Neutral);
+    }
+
+    #[test]
+    fn test_auto_switch_by_context() {
+        let mgr = test_manager();
+
+        // 默认是 hakimi
+        let active = mgr.get_active_persona();
+        assert_eq!(active.id, "hakimi_guardian");
+
+        // 愤怒输入 -> 应该切到毒舌吐槽型
+        let (switched, new_id) = mgr.auto_switch_by_context("这什么傻逼功能，烂透了").unwrap();
+        assert!(switched, "应该触发切换");
+        assert_eq!(new_id, "poison_tongue");
+
+        // 悲伤输入 -> 应该切到温柔学姐型
+        let (switched2, new_id2) = mgr.auto_switch_by_context("我好难过，心里很难受").unwrap();
+        assert!(switched2, "应该触发切换");
+        assert_eq!(new_id2, "gentle_senpai");
+
+        // 中性输入 -> 不切换，保持当前
+        let current = mgr.get_active_persona();
+        let (switched3, new_id3) = mgr.auto_switch_by_context("请查一下天气").unwrap();
+        assert!(!switched3, "中性不应该切换");
+        assert_eq!(new_id3, current.id);
     }
 }

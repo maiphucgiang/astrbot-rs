@@ -4,4 +4,4 @@ pub mod manager;
 
 pub use presets::{Persona, PersonaPresets, ReplyStyle};
 pub use safety::PromptSafety;
-pub use manager::{PersonaManager, CustomPersonaRequest};
+pub use manager::{PersonaManager, CustomPersonaRequest, EmotionState};
