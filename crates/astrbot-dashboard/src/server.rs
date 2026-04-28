@@ -594,11 +594,15 @@ async fn delete_session(
 }
 
 async fn get_session_history(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Json<Value> {
-    // TODO: 接入 SessionStore 查询历史消息
-    Json(json!({"session_id": id, "messages": []}))
+    let sessions = state.sessions.read().await;
+    let session = sessions.iter().find(|s| s.get("id").and_then(|v| v.as_str()) == Some(&id));
+    let messages = session
+        .and_then(|s| s.get("messages").cloned())
+        .unwrap_or(json!([]));
+    Json(json!({"session_id": id, "messages": messages}))
 }
 
 // ========== 消息历史 ==========
@@ -661,5 +665,5 @@ async fn update_setting(
 
 async fn get_logs() -> Json<Value> {
     // TODO: 接入日志系统返回最近 N 条
-    Json(json!({"logs": []}))
+    Json(json!({"logs": [], "note": "Log persistence not yet implemented"}))
 }

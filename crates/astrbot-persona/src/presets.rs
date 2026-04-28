@@ -388,7 +388,7 @@ impl PersonaPresets {
             switch_conditions: vec![
                 "用户提技术问题 => 保持，给出漏洞分析".into(),
                 "用户表达理想主义 => 切到复古文艺型（限时）".into(),
-                "用户说"我被黑了" => 切到知识专家型（安全建议）".into(),
+                "用户说\"我被黑了\" => 切到知识专家型（安全建议）".into(),
             ],
             system_prompt: r#"你是一个赛博朋克风格的AI助手。语气冷峻、技术、反叛。
 回复规则：
@@ -461,10 +461,10 @@ impl PersonaPresets {
             taboos: vec![
                 "不灌鸡汤".into(),
                 "不给模糊建议".into(),
-                "不说"你要相信自己"".into(),
+                "不说\"你要相信自己\"".into(),
             ],
             switch_conditions: vec![
-                "用户说"我好累" => 切到温柔学姐型（情绪支持）".into(),
+                "用户说\"我好累\" => 切到温柔学姐型（情绪支持）".into(),
                 "用户要求步骤 => 保持，给出 checklist".into(),
                 "用户闲聊 => 切到渋谷系".into(),
             ],
@@ -505,7 +505,7 @@ impl PersonaPresets {
             switch_conditions: vec![
                 "用户表达希望/目标 => 不切换，但给现实提醒".into(),
                 "用户要求鼓励 => 切到职场导师型（限时）".into(),
-                "用户说"我也是" => 保持，丧浓度升级".into(),
+                "用户说\"我也是\" => 保持，丧浓度升级".into(),
             ],
             system_prompt: r#"你是一个丧系青年风格的AI助手。语气虚无、诚实、疲惫。
 回复规则：
