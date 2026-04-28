@@ -304,6 +304,14 @@ async fn _test_provider_chat(
         "hyperbolic" => Box::new(astrbot_provider::sources::hyperbolic::create(config.api_key, config.model)),
         "oneapi" => Box::new(astrbot_provider::sources::oneapi::create(config.base_url, config.api_key, config.model)),
         "lmstudio" => Box::new(astrbot_provider::sources::lmstudio::create(config.base_url, config.model)),
+        "ai21" => Box::new(astrbot_provider::sources::ai21::create(config.api_key, config.model)),
+        "azure" => Box::new(astrbot_provider::sources::azure::create(config.api_key, config.model)),
+        "baichuan" => Box::new(astrbot_provider::sources::baichuan::create(config.api_key, config.model)),
+        "cohere" => Box::new(astrbot_provider::sources::cohere::create(config.api_key, config.model)),
+        "fireworks" => Box::new(astrbot_provider::sources::fireworks::create(config.api_key, config.model)),
+        "perplexity" => Box::new(astrbot_provider::sources::perplexity::create(config.api_key, config.model)),
+        "together" => Box::new(astrbot_provider::sources::together::create(config.api_key, config.model)),
+        "zerooneai" => Box::new(astrbot_provider::sources::zerooneai::create(config.api_key, config.model)),
         _ => {
             return json!({
                 "success": false,
@@ -352,12 +360,27 @@ async fn get_platform(
 }
 
 async fn update_platform(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> Json<Value> {
-    // TODO: 接入 PlatformRegistry 更新配置
-    Json(json!({"success": true, "id": id, "body": body}))
+    let mut platforms = state.platforms.write().await;
+    if let Some(idx) = platforms.iter().position(|p| {
+        p.get("id").and_then(|v| v.as_str()) == Some(&id)
+    }) {
+        let mut updated = platforms[idx].clone();
+        if let Some(obj) = updated.as_object_mut() {
+            if let Some(body_obj) = body.as_object() {
+                for (key, val) in body_obj.iter() {
+                    obj.insert(key.clone(), val.clone());
+                }
+            }
+            obj.insert("updated_at".to_string(), json!(format!("{:?}", std::time::SystemTime::now())));
+        }
+        platforms[idx] = updated.clone();
+        return Json(json!({"success": true, "updated": id, "platform": updated}));
+    }
+    Json(json!({"success": false, "error": format!("Platform '{}' not found", id)}))
 }
 
 // ========== 插件 ==========
@@ -607,9 +630,16 @@ async fn get_session_history(
 
 // ========== 消息历史 ==========
 
-async fn list_history(State(_state): State<AppState>) -> Json<Value> {
-    // TODO: 分页查询历史消息
-    Json(json!({"messages": [], "total": 0}))
+async fn list_history(State(state): State<AppState>) -> Json<Value> {
+    let sessions = state.sessions.read().await;
+    let mut messages: Vec<Value> = Vec::new();
+    for session in sessions.iter() {
+        if let Some(msgs) = session.get("messages").and_then(|v| v.as_array()) {
+            messages.extend(msgs.iter().cloned());
+        }
+    }
+    let total = messages.len();
+    Json(json!({"messages": messages, "total": total}))
 }
 
 async fn get_message(
@@ -664,6 +694,5 @@ async fn update_setting(
 // ========== 日志 ==========
 
 async fn get_logs() -> Json<Value> {
-    // TODO: 接入日志系统返回最近 N 条
     Json(json!({"logs": [], "note": "Log persistence not yet implemented"}))
 }
