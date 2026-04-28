@@ -172,6 +172,10 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/knowledge", get(list_knowledge_bases))
         .route("/api/knowledge/{id}/documents", get(list_knowledge_documents))
         .route("/api/personas", get(list_personas))
+        .route("/api/personas/:id/activate", post(activate_persona))
+        .route("/api/personas/custom", post(create_custom_persona))
+        .route("/api/personas/:id", put(update_persona))
+        .route("/api/personas/:id", delete(delete_persona))
         .route("/api/tools", get(list_tools))
         .route("/api/backups", get(list_backups))
         .route("/api/stats", get(get_stats))
@@ -912,6 +916,148 @@ async fn list_webhooks(State(state): State<Arc<AppState>>) -> Json<Value> {
         "webhooks": [],
         "total": 0,
         "enabled_count": 0,
+    }))
+}
+
+// ===== Persona API handlers =====
+
+async fn activate_persona(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Json<Value> {
+    if let Some(ref registry) = state.persona_registry {
+        match registry.switch(&id).await {
+            Ok(persona) => {
+                return Json(json!({
+                    "success": true,
+                    "persona_id": id,
+                    "persona_name": persona.name,
+                    "message": format!("Switched to persona: {}", persona.name),
+                }));
+            }
+            Err(e) => {
+                return Json(json!({
+                    "success": false,
+                    "persona_id": id,
+                    "error": format!("{}", e),
+                    "message": format!("Failed to switch persona: {}", e),
+                }));
+            }
+        }
+    }
+    Json(json!({
+        "success": false,
+        "error": "Persona registry not available",
+        "message": "Persona registry is not initialized",
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreatePersonaRequest {
+    pub id: String,
+    pub name: String,
+    pub system_prompt: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub variables: std::collections::HashMap<String, String>,
+}
+
+async fn create_custom_persona(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CreatePersonaRequest>,
+) -> Json<Value> {
+    if let Some(ref registry) = state.persona_registry {
+        let persona = astrbot_core::persona::Persona {
+            id: req.id.clone(),
+            name: req.name.clone(),
+            system_prompt: req.system_prompt.clone(),
+            variables: req.variables,
+            is_default: false,
+            description: req.description,
+        };
+        registry.register(persona).await;
+        return Json(json!({
+            "success": true,
+            "persona_id": req.id,
+            "persona_name": req.name,
+            "message": format!("Custom persona '{}' created successfully", req.name),
+        }));
+    }
+    Json(json!({
+        "success": false,
+        "error": "Persona registry not available",
+        "message": "Persona registry is not initialized",
+    }))
+}
+
+async fn update_persona(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(req): Json<CreatePersonaRequest>,
+) -> Json<Value> {
+    if let Some(ref registry) = state.persona_registry {
+        // 先检查是否存在
+        if registry.get(&id).await.is_none() {
+            return Json(json!({
+                "success": false,
+                "persona_id": id,
+                "error": "Persona not found",
+                "message": format!("Persona '{}' does not exist", id),
+            }));
+        }
+        // 注销旧的，注册新的（覆盖）
+        let _ = registry.unregister(&id).await;
+        let persona = astrbot_core::persona::Persona {
+            id: id.clone(),
+            name: req.name.clone(),
+            system_prompt: req.system_prompt.clone(),
+            variables: req.variables,
+            is_default: false,
+            description: req.description,
+        };
+        registry.register(persona).await;
+        return Json(json!({
+            "success": true,
+            "persona_id": id,
+            "persona_name": req.name,
+            "message": format!("Persona '{}' updated successfully", req.name),
+        }));
+    }
+    Json(json!({
+        "success": false,
+        "error": "Persona registry not available",
+        "message": "Persona registry is not initialized",
+    }))
+}
+
+async fn delete_persona(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Json<Value> {
+    if let Some(ref registry) = state.persona_registry {
+        match registry.unregister(&id).await {
+            Ok(()) => {
+                return Json(json!({
+                    "success": true,
+                    "persona_id": id,
+                    "message": format!("Persona '{}' deleted successfully", id),
+                }));
+            }
+            Err(e) => {
+                return Json(json!({
+                    "success": false,
+                    "persona_id": id,
+                    "error": format!("{}", e),
+                    "message": format!("Failed to delete persona: {}", e),
+                }));
+            }
+        }
+    }
+    Json(json!({
+        "success": false,
+        "error": "Persona registry not available",
+        "message": "Persona registry is not initialized",
     }))
 }
 
