@@ -1,6 +1,5 @@
 use anyhow::{bail, Result};
 use serde_json::Value;
-use std::collections::HashSet;
 
 /// 白名单模块：只允许这些 import
 static ALLOWED_MODULES: &[&str] = &[
@@ -32,7 +31,7 @@ code = sys.argv[1]
 try:
     tree = ast.parse(code)
 except SyntaxError as e:
-    print(json.dumps({{"ok": false, "error": f"SyntaxError: {e}"}}))
+    print(json.dumps({{"ok": false, "error": "SyntaxError: " + str(e)}}))
     sys.exit(0)
 
 forbidden = {forbidden}
@@ -44,14 +43,14 @@ for node in ast.walk(tree):
         for alias in node.names:
             mod = alias.name.split('.')[0]
             if mod not in allowed:
-                issues.append(f"Forbidden import: {mod}")
+                issues.append("Forbidden import: " + mod)
     elif isinstance(node, ast.ImportFrom):
         mod = node.module.split('.')[0] if node.module else ''
         if mod not in allowed:
-            issues.append(f"Forbidden import from: {mod}")
+            issues.append("Forbidden import from: " + mod)
     elif isinstance(node, ast.Call):
         if isinstance(node.func, ast.Name) and node.func.id in forbidden:
-            issues.append(f"Forbidden call: {node.func.id}")
+            issues.append("Forbidden call: " + node.func.id)
         elif isinstance(node.func, ast.Attribute):
             chain = []
             n = node.func
@@ -63,7 +62,7 @@ for node in ast.walk(tree):
             chain.reverse()
             name = '.'.join(chain[:2])
             if any(f in name for f in forbidden):
-                issues.append(f"Forbidden attribute chain: {name}")
+                issues.append("Forbidden attribute chain: " + name)
     elif isinstance(node, ast.Subscript):
         if isinstance(node.value, ast.Name) and node.value.id == '__builtins__':
             issues.append("Forbidden: __builtins__ access")

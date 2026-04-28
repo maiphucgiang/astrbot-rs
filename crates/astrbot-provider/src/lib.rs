@@ -7,8 +7,6 @@ pub use openai_compatible::*;
 pub use registry::*;
 pub use tts::*;
 
-pub use crate::EmbeddingProvider;
-
 use async_trait::async_trait;
 use astrbot_core::{AstrMessage, MessageContent};
 use serde::{Deserialize, Serialize};

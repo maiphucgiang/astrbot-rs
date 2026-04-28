@@ -1,7 +1,24 @@
+pub mod net;
+pub mod access;
+pub mod agent;
+pub mod backup;
+pub mod config;
+pub mod db;
 pub mod event;
 pub mod message;
-pub mod config;
 pub mod metrics;
+pub mod platform;
+pub mod provider;
+pub mod plugin;
+pub mod persona;
+pub mod rag;
+pub mod search;
+pub mod tools;
+pub mod safety;
+pub mod t2i;
+pub mod mcp;
+pub mod webhook;
+pub mod sse;
 pub mod session;
 pub mod types;
 

@@ -326,7 +326,7 @@ impl PersonaPresets {
                 "有事吩咐，没事我蹲墙角。".into(),
             ],
             taboos: vec![
-                "不说"我不记得了"".into(),
+                "不说\"我不记得了\"".into(),
                 "不否认用户的感受".into(),
                 "不主动离开".into(),
             ],

@@ -117,7 +117,7 @@ impl PersonaManager {
     
     /// 删除人格（内置人格不可删除）
     pub fn remove_persona(&self, id: &str) -> Result<()> {
-        let builtin_ids: HashSet<String> = PersonaPresets::all()
+        let builtin_ids: std::collections::HashSet<String> = PersonaPresets::all()
             .into_iter()
             .map(|p| p.id)
             .collect();
@@ -151,7 +151,13 @@ impl PersonaManager {
         let safe_text = PromptSafety::sanitize(raw_text);
         PromptSafety::check_user_input(&safe_text)?;
         
-        let p = persona.unwrap_or(&self.get_active_persona());
+        let p = match persona {
+            Some(p) => p,
+            None => {
+                let active = self.get_active_persona();
+                return self.generate_reply(raw_text, Some(&active));
+            }
+        };
         let style = &p.reply_style;
         
         // 2. 应用风格模板
