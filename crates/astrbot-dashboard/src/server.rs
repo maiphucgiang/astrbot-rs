@@ -44,10 +44,24 @@ impl AppState {
     }
 }
 
-/// 启动 Dashboard Web 服务
+/// 启动 Dashboard Web 服务 (新版，使用 routes 架构 + SQLite 持久化)
 pub async fn start_server() {
-    let state = AppState::new();
-    let app = build_router(state);
+    let db = Arc::new(
+        astrbot_core::db::Database::new_in_memory().await.unwrap()
+    );
+
+    let persona_registry = Arc::new(
+        astrbot_core::persona::PersonaRegistry::with_db(db.clone())
+    );
+    let default_persona = astrbot_core::persona::default_persona();
+    persona_registry.register(default_persona).await;
+    let _ = persona_registry.switch("default").await;
+
+    let state = crate::routes::AppState::new(env!("CARGO_PKG_VERSION").to_string())
+        .with_db(db)
+        .with_persona_registry(persona_registry);
+
+    let app = crate::routes::create_router(Arc::new(state));
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 6185));
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();

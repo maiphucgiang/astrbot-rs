@@ -1,3 +1,4 @@
+use crate::db::Database;
 use crate::errors::{AstrBotError, Result};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -99,11 +100,11 @@ impl Persona {
 
 /// In-memory registry of personas with load / get / list / switch operations.
 ///
-/// Persists state only in memory; for on-disk storage, call `load_from_config`
-/// or serialize the registry contents yourself.
+/// Persists state to SQLite when a `Database` handle is provided.
 pub struct PersonaRegistry {
     personas: RwLock<HashMap<String, Arc<Persona>>>,
     active_id: RwLock<Option<String>>,
+    db: Option<Arc<Database>>,
 }
 
 impl Default for PersonaRegistry {
@@ -113,12 +114,98 @@ impl Default for PersonaRegistry {
 }
 
 impl PersonaRegistry {
-    /// Create an empty registry.
+    /// Create an empty registry (memory-only).
     pub fn new() -> Self {
         Self {
             personas: RwLock::new(HashMap::new()),
             active_id: RwLock::new(None),
+            db: None,
         }
+    }
+
+    /// Create a registry backed by SQLite.
+    pub fn with_db(db: Arc<Database>) -> Self {
+        Self {
+            personas: RwLock::new(HashMap::new()),
+            active_id: RwLock::new(None),
+            db: Some(db),
+        }
+    }
+
+    /// Initialize from database: load all stored personas and active id.
+    pub async fn init_from_db(&self) -> Result<()> {
+        let Some(ref db) = self.db else {
+            return Ok(());
+        };
+
+        let rows = db.load_personas().await?;
+        let mut map = HashMap::new();
+        let mut default_id: Option<String> = None;
+
+        for row in rows {
+            let variables: HashMap<String, String> = serde_json::from_str(&row.variables)
+                .unwrap_or_default();
+            let persona = Persona {
+                id: row.id.clone(),
+                name: row.name,
+                system_prompt: row.system_prompt,
+                variables,
+                is_default: row.is_default != 0,
+                description: row.description,
+            };
+            if persona.is_default && default_id.is_none() {
+                default_id = Some(row.id.clone());
+            }
+            map.insert(row.id, Arc::new(persona));
+        }
+
+        let mut lock = self.personas.write().await;
+        *lock = map;
+        drop(lock);
+
+        if let Some(active) = db.load_active_persona().await? {
+            let mut active_lock = self.active_id.write().await;
+            *active_lock = Some(active);
+        } else if let Some(id) = default_id {
+            let mut active_lock = self.active_id.write().await;
+            *active_lock = Some(id);
+        }
+
+        info!("[PersonaRegistry] Loaded {} persona(s) from DB", self.personas.read().await.len());
+        Ok(())
+    }
+
+    /// Persist a single persona to DB.
+    async fn persist_persona(&self, persona: &Persona) -> Result<()> {
+        let Some(ref db) = self.db else {
+            return Ok(());
+        };
+        let variables_json = serde_json::to_string(&persona.variables)
+            .unwrap_or_else(|_| "{}".to_string());
+        db.save_persona(
+            &persona.id,
+            &persona.name,
+            &persona.system_prompt,
+            &variables_json,
+            persona.is_default,
+            persona.description.as_deref(),
+        ).await
+    }
+
+    /// Remove a persona from DB.
+    async fn remove_persona_db(&self, id: &str) -> Result<()> {
+        let Some(ref db) = self.db else {
+            return Ok(());
+        };
+        db.delete_persona(id).await
+    }
+
+    /// Persist active persona ID to DB.
+    async fn persist_active(&self, id: &str) -> Result<()> {
+        let Some(ref db) = self.db else {
+            return Ok(());
+        };
+        db.save_active_persona(id).await
     }
 
     /// Load personas from a list, replacing any existing entries.
@@ -140,7 +227,9 @@ impl PersonaRegistry {
 
         if let Some(id) = default_id {
             let mut active = self.active_id.write().await;
-            *active = Some(id);
+            *active = Some(id.clone());
+            drop(active);
+            let _ = self.persist_active(&id).await;
         }
 
         info!("[PersonaRegistry] Loaded {} persona(s)", self.personas.read().await.len());
@@ -149,6 +238,7 @@ impl PersonaRegistry {
     /// Register a single persona.
     pub async fn register(&self, persona: Persona) {
         let id = persona.id.clone();
+        let _ = self.persist_persona(&persona).await;
         let mut lock = self.personas.write().await;
         lock.insert(id.clone(), Arc::new(persona));
         info!("[PersonaRegistry] Registered persona: {}", id);
@@ -164,6 +254,7 @@ impl PersonaRegistry {
         }
         drop(active);
 
+        let _ = self.remove_persona_db(id).await;
         let mut lock = self.personas.write().await;
         lock.remove(id);
         info!("[PersonaRegistry] Unregistered persona: {}", id);
@@ -209,8 +300,10 @@ impl PersonaRegistry {
 
         let mut active = self.active_id.write().await;
         *active = Some(id.to_string());
-        info!("[PersonaRegistry] Switched to persona: {} ({})", persona.name, id);
+        drop(active);
+        let _ = self.persist_active(id).await;
 
+        info!("[PersonaRegistry] Switched to persona: {} ({})", persona.name, id);
         Ok(persona)
     }
 

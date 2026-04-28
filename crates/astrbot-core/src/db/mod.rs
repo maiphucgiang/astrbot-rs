@@ -80,6 +80,22 @@ impl Database {
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
 
+            CREATE TABLE IF NOT EXISTS personas (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                system_prompt TEXT NOT NULL,
+                variables TEXT NOT NULL DEFAULT '{}',
+                is_default INTEGER NOT NULL DEFAULT 0,
+                description TEXT,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS active_persona (
+                key TEXT PRIMARY KEY DEFAULT 'global',
+                persona_id TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_session ON message_history(session_id);
             CREATE INDEX IF NOT EXISTS idx_messages_created ON message_history(created_at);
             "#
@@ -286,8 +302,97 @@ impl Database {
         Ok(count)
     }
 
+    /// Save or update a persona
+    pub async fn save_persona(
+        &self,
+        id: &str,
+        name: &str,
+        system_prompt: &str,
+        variables: &str, // JSON string
+        is_default: bool,
+        description: Option<&str>,
+    ) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        let is_default_i: i64 = if is_default { 1 } else { 0 };
+        sqlx::query(
+            "INSERT INTO personas (id, name, system_prompt, variables, is_default, description, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                system_prompt = excluded.system_prompt,
+                variables = excluded.variables,
+                is_default = excluded.is_default,
+                description = excluded.description"
+        )
+        .bind(id)
+        .bind(name)
+        .bind(system_prompt)
+        .bind(variables)
+        .bind(is_default_i)
+        .bind(description)
+        .bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AstrBotError::Internal(format!("Failed to save persona: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// Load all personas from database
+    pub async fn load_personas(
+        &self,
+    ) -> Result<Vec<PersonaRecord>> {
+        let rows = sqlx::query_as::<_, PersonaRecord>(
+            "SELECT id, name, system_prompt, variables, is_default, description, created_at FROM personas ORDER BY created_at DESC"
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AstrBotError::Internal(format!("Failed to load personas: {}", e)))?;
+
+        Ok(rows)
+    }
+
+    /// Delete a persona by ID
+    pub async fn delete_persona(&self, id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM personas WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AstrBotError::Internal(format!("Failed to delete persona: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// Save active persona ID
+    pub async fn save_active_persona(&self, id: &str) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO active_persona (key, persona_id, updated_at) VALUES ('global', ?, ?)
+             ON CONFLICT(key) DO UPDATE SET persona_id = excluded.persona_id, updated_at = excluded.updated_at"
+        )
+        .bind(id)
+        .bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AstrBotError::Internal(format!("Failed to save active persona: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// Load active persona ID
+    pub async fn load_active_persona(&self) -> Result<Option<String>> {
+        let row: Option<(String,)> = sqlx::query_as(
+            "SELECT persona_id FROM active_persona WHERE key = 'global'"
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| AstrBotError::Internal(format!("Failed to load active persona: {}", e)))?;
+
+        Ok(row.map(|r| r.0))
+    }
+
     /// Get paginated message history for a session (cursor-based)
-    /// 
+    ///
     /// Returns: (messages, next_cursor, has_more)
     /// - cursor: id of the oldest message in the previous page (None for first page)
     /// - Ordering: newest first (id DESC)
@@ -344,6 +449,18 @@ impl Database {
 
         Ok((result, next_cursor, has_more))
     }
+}
+
+/// Persona database record
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct PersonaRecord {
+    pub id: String,
+    pub name: String,
+    pub system_prompt: String,
+    pub variables: String, // JSON
+    pub is_default: i64,
+    pub description: Option<String>,
+    pub created_at: String,
 }
 
 /// Session record
