@@ -198,16 +198,43 @@ async fn update_provider(
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> Json<Value> {
-    // TODO: 接入 ProviderRegistry 更新配置
-    Json(json!({"success": true, "id": id, "body": body}))
+    let mut providers = state.providers.write().await;
+    let idx = providers.iter().position(|p| {
+        p.get("id").and_then(|v| v.as_str()) == Some(&id)
+            || p.get("name").and_then(|v| v.as_str()) == Some(&id)
+    });
+
+    match idx {
+        Some(i) => {
+            let existing = &providers[i];
+            let mut updated = existing.clone();
+            if let Some(obj) = updated.as_object_mut() {
+                if let Some(body_obj) = body.as_object() {
+                    for (k, v) in body_obj {
+                        obj.insert(k.clone(), v.clone());
+                    }
+                }
+                obj.insert("id".to_string(), json!(id));
+            }
+            providers[i] = updated.clone();
+            Json(json!({"success": true, "provider": updated}))
+        }
+        None => Json(json!({"success": false, "error": "Provider not found"})),
+    }
 }
 
 async fn delete_provider(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Json<Value> {
-    // TODO: 从配置中移除 provider
-    Json(json!({"success": true, "deleted": id}))
+    let mut providers = state.providers.write().await;
+    let len_before = providers.len();
+    providers.retain(|p| {
+        p.get("id").and_then(|v| v.as_str()) != Some(&id)
+            && p.get("name").and_then(|v| v.as_str()) != Some(&id)
+    });
+    let deleted = providers.len() < len_before;
+    Json(json!({"success": deleted, "deleted": id}))
 }
 
 async fn test_provider(
