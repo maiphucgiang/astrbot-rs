@@ -1,7 +1,20 @@
+pub mod openai;
 pub mod openai_compatible;
 pub mod sources;
 pub mod registry;
 pub mod tts;
+
+// New providers from Redmao Phase 2
+pub mod ai21;
+pub mod azure;
+pub mod baichuan;
+pub mod cohere;
+pub mod fireworks;
+pub mod groq;
+pub mod openrouter;
+pub mod perplexity;
+pub mod together;
+pub mod zerooneai;
 
 pub use openai_compatible::*;
 pub use registry::*;
