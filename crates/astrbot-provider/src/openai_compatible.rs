@@ -76,6 +76,24 @@ impl OpenAiCompatibleProvider {
     pub fn config(&self) -> &ProviderConfig {
         &self.config
     }
+
+    /// 构建 HTTP 请求的基础方法
+    fn build_request(&self, endpoint: &str, body: serde_json::Value) -> reqwest::RequestBuilder {
+        let url = format!("{}/{}", self.config.base_url.trim_end_matches('/'), endpoint);
+        let mut req = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.config.api_key))
+            .header("Content-Type", "application/json")
+            .json(&body);
+
+        if let Some(headers) = &self.config.extra_headers {
+            for (k, v) in headers {
+                req = req.header(k, v);
+            }
+        }
+        req
+    }
 }
 
 #[async_trait]
@@ -99,20 +117,7 @@ impl ChatProvider for OpenAiCompatibleProvider {
             "top_p": options.top_p.unwrap_or(1.0),
         });
 
-        let mut request = self
-            .client
-            .post(format!("{}/v1/chat/completions", self.config.base_url.trim_end_matches('/')))
-            .header("Authorization", format!("Bearer {}", self.config.api_key))
-            .header("Content-Type", "application/json")
-            .json(&body);
-
-        if let Some(headers) = &self.config.extra_headers {
-            for (k, v) in headers {
-                request = request.header(k, v);
-            }
-        }
-
-        let response = request.send().await?;
+        let response = self.build_request("v1/chat/completions", body).send().await?;
         let status = response.status();
 
         if !status.is_success() {
@@ -152,20 +157,7 @@ impl ChatProvider for OpenAiCompatibleProvider {
             "stream": true,
         });
 
-        let mut request = self
-            .client
-            .post(format!("{}/v1/chat/completions", self.config.base_url.trim_end_matches('/')))
-            .header("Authorization", format!("Bearer {}", self.config.api_key))
-            .header("Content-Type", "application/json")
-            .json(&body);
-
-        if let Some(headers) = &self.config.extra_headers {
-            for (k, v) in headers {
-                request = request.header(k, v);
-            }
-        }
-
-        let response = request.send().await?;
+        let response = self.build_request("v1/chat/completions", body).send().await?;
         let status = response.status();
 
         if !status.is_success() {
@@ -181,5 +173,51 @@ impl ChatProvider for OpenAiCompatibleProvider {
 
     fn list_models(&self) -> Vec<String> {
         vec![self.config.model.clone()]
+    }
+
+    fn is_available(&self) -> bool {
+        !self.config.api_key.is_empty()
+    }
+}
+
+#[async_trait]
+impl crate::EmbeddingProvider for OpenAiCompatibleProvider {
+    fn name(&self) -> &str {
+        &self.config.name
+    }
+
+    async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, ProviderError> {
+        let body = serde_json::json!({
+            "model": self.config.model,
+            "input": texts,
+        });
+
+        let response = self.build_request("v1/embeddings", body).send().await?;
+        let status = response.status();
+
+        if !status.is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(ProviderError::Api {
+                status: status.as_u16(),
+                message: text,
+            });
+        }
+
+        let json: Value = response.json().await?;
+        let embeddings: Vec<Vec<f32>> = json["data"]
+            .as_array()
+            .unwrap_or(&Vec::new())
+            .iter()
+            .map(|item| {
+                item["embedding"]
+                    .as_array()
+                    .unwrap_or(&Vec::new())
+                    .iter()
+                    .map(|v| v.as_f64().unwrap_or(0.0) as f32)
+                    .collect()
+            })
+            .collect();
+
+        Ok(embeddings)
     }
 }

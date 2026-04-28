@@ -7,6 +7,8 @@ pub use openai_compatible::*;
 pub use registry::*;
 pub use tts::*;
 
+pub use crate::EmbeddingProvider;
+
 use async_trait::async_trait;
 use astrbot_core::{AstrMessage, MessageContent};
 use serde::{Deserialize, Serialize};
@@ -45,6 +47,22 @@ pub trait ChatProvider: Send + Sync {
     /// 是否可用
     fn is_available(&self) -> bool {
         true
+    }
+}
+
+/// 文本嵌入 Provider trait
+#[async_trait]
+pub trait EmbeddingProvider: Send + Sync {
+    /// 模型提供商名称
+    fn name(&self) -> &str;
+
+    /// 将文本列表转换为 embedding 向量
+    async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, ProviderError>;
+
+    /// 单个文本嵌入（便利方法）
+    async fn embed_one(&self, text: String) -> Result<Vec<f32>, ProviderError> {
+        let mut results = self.embed(vec![text]).await?;
+        results.pop().ok_or_else(|| ProviderError::Unavailable("empty embedding response".to_string()))
     }
 }
 
