@@ -4,6 +4,10 @@ use lazy_static::lazy_static;
 /// 错误翻译器：将技术错误转换为用户友好的消息
 pub struct ErrorTranslator;
 
+/// 语言枚举，多语言支持
+pub use crate::errors::i18n::Lang;
+pub mod i18n;
+
 /// 错误代码
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ErrorCode {
@@ -192,7 +196,7 @@ impl ErrorTranslator {
         Self
     }
 
-    /// 将技术错误消息翻译为人类可读消息
+    /// 将技术错误消息翻译为人类可读消息（默认中文）
     pub fn translate(&self, raw_error: &str) -> HumanizedError {
         let code = self.detect_code(raw_error);
         let level = self.infer_level(&code);
@@ -209,6 +213,12 @@ impl ErrorTranslator {
             reason: reason.to_string(),
             suggestion: suggestion.to_string(),
         }
+    }
+
+    /// 按指定语言翻译错误码（Phase 2 新增）
+    pub fn translate_by_code(&self, code: ErrorCode, lang: Lang) -> HumanizedError {
+        let level = self.infer_level(&code);
+        i18n::translate_by_code(&code, level, lang)
     }
 
     /// 检测错误代码

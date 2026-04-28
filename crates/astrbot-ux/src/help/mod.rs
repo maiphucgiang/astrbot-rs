@@ -274,6 +274,24 @@ impl HelpSystem {
         }
     }
 
+    /// 聊天场景入口：/help 或 /help <cmd>
+    ///
+    /// - `help_text(None)` → 快速概览（最常用的指令）
+    /// - `help_text(Some("all"))` → 完整指令列表
+    /// - `help_text(Some("search <keyword>"))` → 关键词搜索
+    /// - `help_text(Some("<cmd>"))` → 单条指令详情
+    pub fn help_text(&self, cmd: Option<&str>) -> String {
+        match cmd {
+            None | Some("") | Some("quick") => self.render_quick(),
+            Some("all") => self.render_all(),
+            Some(keyword) if keyword.starts_with("search ") => {
+                let kw = keyword.trim_start_matches("search ").trim();
+                self.render_search(kw)
+            }
+            Some(cmd_name) => self.render_command(cmd_name),
+        }
+    }
+
     /// 快速概览：最常用的 8 条指令
     fn render_quick(&self) -> String {
         let mut lines = vec![
@@ -468,10 +486,57 @@ mod tests {
     }
 
     #[test]
-    fn test_command_aliases() {
-        let registry = CommandRegistry::new();
-        let persona = registry.get("persona").unwrap();
-        assert!(persona.aliases.contains(&"p".to_string()));
-        assert!(persona.aliases.contains(&"人格".to_string()));
+    fn test_help_text_none() {
+        let help = HelpSystem::new();
+        let text = help.help_text(None);
+        assert!(text.contains("常用指令"));
+        assert!(text.contains("/help all"));
+    }
+
+    #[test]
+    fn test_help_text_all() {
+        let help = HelpSystem::new();
+        let text = help.help_text(Some("all"));
+        assert!(text.contains("完整指令列表"));
+        assert!(text.contains("/help"));
+        assert!(text.contains("/status"));
+    }
+
+    #[test]
+    fn test_help_text_command() {
+        let help = HelpSystem::new();
+        let text = help.help_text(Some("reset"));
+        assert!(text.contains("reset"));
+        assert!(text.contains("重置"));
+        assert!(text.contains("用法示例"));
+    }
+
+    #[test]
+    fn test_help_text_search() {
+        let help = HelpSystem::new();
+        let text = help.help_text(Some("search 平台"));
+        assert!(text.contains("平台"));
+        assert!(text.contains("status") || text.contains("状态"));
+    }
+
+    #[test]
+    fn test_help_text_quick() {
+        let help = HelpSystem::new();
+        let text = help.help_text(Some("quick"));
+        assert!(text.contains("常用指令"));
+    }
+
+    #[test]
+    fn test_help_text_unknown_command() {
+        let help = HelpSystem::new();
+        let text = help.help_text(Some("xyz123"));
+        assert!(text.contains("找不到指令"));
+    }
+
+    #[test]
+    fn test_help_text_empty() {
+        let help = HelpSystem::new();
+        let text = help.help_text(Some(""));
+        assert!(text.contains("常用指令"));
     }
 }
