@@ -201,4 +201,27 @@ mod tests {
         assert_eq!(config.models.len(), 2);
         assert!(config.extra.contains_key("organization"));
     }
+
+    #[tokio::test]
+    async fn test_mock_provider_health_check() {
+        let mock = MockProvider::new("mock", "Mock", false);
+        assert!(mock.health_check().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_mock_provider_chat() {
+        let mock = MockProvider::new("mock", "Mock", false);
+        let response = mock.chat(
+            vec![ChatMessage::user("Hi")],
+            ChatConfig::default(),
+        ).await.unwrap();
+        assert_eq!(response.content, "Mock response");
+    }
+
+    #[tokio::test]
+    async fn test_mock_provider_models() {
+        let mock = MockProvider::new("mock", "Mock", false);
+        let models = mock.models().await.unwrap();
+        assert!(!models.is_empty());
+    }
 }
