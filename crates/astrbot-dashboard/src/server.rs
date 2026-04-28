@@ -367,11 +367,27 @@ async fn list_plugins(State(state): State<AppState>) -> Json<Value> {
 }
 
 async fn install_plugin(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(body): Json<Value>,
 ) -> Json<Value> {
-    // TODO: 接入 PluginManager 安装插件
-    Json(json!({"success": true, "installed": body}))
+    let plugin_id = body.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    if plugin_id.is_empty() {
+        return Json(json!({"success": false, "error": "Plugin id is required"}));
+    }
+
+    let mut plugins = state.plugins.write().await;
+    let exists = plugins.iter().any(|p| p.get("id").and_then(|v| v.as_str()) == Some(&plugin_id));
+    if exists {
+        return Json(json!({"success": false, "error": format!("Plugin '{}' already installed", plugin_id)}));
+    }
+
+    let mut plugin = body.clone();
+    if let Some(obj) = plugin.as_object_mut() {
+        obj.entry("enabled".to_string()).or_insert(json!(true));
+        obj.entry("installed_at".to_string()).or_insert(json!(format!("{:?}", std::time::SystemTime::now())));
+    }
+    plugins.push(plugin.clone());
+    Json(json!({"success": true, "plugin": plugin}))
 }
 
 async fn get_plugin(
@@ -386,19 +402,32 @@ async fn get_plugin(
 }
 
 async fn uninstall_plugin(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Json<Value> {
-    // TODO: 接入 PluginManager 卸载插件
-    Json(json!({"success": true, "uninstalled": id}))
+    let mut plugins = state.plugins.write().await;
+    let len_before = plugins.len();
+    plugins.retain(|p| p.get("id").and_then(|v| v.as_str()) != Some(&id));
+    let deleted = plugins.len() < len_before;
+    Json(json!({"success": deleted, "uninstalled": id}))
 }
 
 async fn toggle_plugin(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Json<Value> {
-    // TODO: 启用/禁用插件
-    Json(json!({"success": true, "toggled": id}))
+    let mut plugins = state.plugins.write().await;
+    match plugins.iter_mut().find(|p| p.get("id").and_then(|v| v.as_str()) == Some(&id)) {
+        Some(plugin) => {
+            if let Some(obj) = plugin.as_object_mut() {
+                let current = obj.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+                obj.insert("enabled".to_string(), json!(!current));
+                return Json(json!({"success": true, "plugin_id": id, "enabled": !current}));
+            }
+            Json(json!({"success": false, "error": "Invalid plugin structure"}))
+        }
+        None => Json(json!({"success": false, "error": "Plugin not found"})),
+    }
 }
 
 // ========== 人格预设 ==========
