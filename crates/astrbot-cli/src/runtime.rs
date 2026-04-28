@@ -1,10 +1,4 @@
-use astrbot_core::errors::Result;
-use astrbot_core::message::MessageChain;
-use astrbot_core::pipeline::ReplySender;
-use astrbot_core::platform::MessageSource;
-use astrbot_provider::openai::OpenAiProvider;
 use astrbot_provider::client::ProviderManager;
-use std::sync::Arc;
 use tracing::info;
 
 /// Bot runtime — holds all components and manages lifecycle
@@ -28,7 +22,7 @@ impl BotRuntime {
         model: &str,
     ) {
         let url = base_url.unwrap_or("https://api.openai.com").to_string();
-        let provider = OpenAiProvider::new(
+        let provider = astrbot_provider::openai::OpenAiProvider::new(
             id.to_string(),
             api_key.to_string(),
             url,
@@ -39,7 +33,7 @@ impl BotRuntime {
     }
 
     /// Graceful shutdown
-    pub async fn stop_all(&mut self) -> Result<()> {
+    pub async fn stop_all(&mut self) -> astrbot_core::errors::Result<()> {
         info!("[Runtime] Stopping all components...");
         Ok(())
     }
