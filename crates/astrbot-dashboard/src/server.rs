@@ -5,6 +5,7 @@ use axum::{
     Json,
 };
 use astrbot_persona::{PersonaManager, CustomPersonaRequest, ReplyStyle};
+use astrbot_provider::{ChatProvider, ChatMessage, ChatOptions, ProviderConfig};
 use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -210,11 +211,100 @@ async fn delete_provider(
 }
 
 async fn test_provider(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Json<Value> {
-    // TODO: 实际调用 provider.chat() 测试连通性
-    Json(json!({"success": true, "provider": id, "latency_ms": 0}))
+    let cfg = {
+        let providers = state.providers.read().await;
+        let provider_cfg = providers.iter().find(|p| {
+            p.get("id").and_then(|v| v.as_str()) == Some(&id)
+                || p.get("name").and_then(|v| v.as_str()) == Some(&id)
+        });
+        match provider_cfg.cloned() {
+            Some(v) => v,
+            None => return Json(json!({"success": false, "error": "Provider not found"})),
+        }
+    };
+
+    let provider_type = cfg.get("provider_type").and_then(|v| v.as_str()).unwrap_or("openai");
+    let api_key = cfg.get("api_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let base_url = cfg.get("base_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let model = cfg.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let name = cfg.get("name").and_then(|v| v.as_str()).unwrap_or(provider_type).to_string();
+
+    let config = ProviderConfig {
+        name: name.clone(),
+        base_url,
+        api_key,
+        model: model.clone(),
+        extra_headers: None,
+    };
+
+    let start = std::time::Instant::now();
+    let test_msg = ChatMessage::user("Hello, this is a connectivity test from AstrBot Dashboard.");
+    let options = ChatOptions::default();
+
+    let result = _test_provider_chat(provider_type, config, id, test_msg, options).await;
+    let latency_ms = start.elapsed().as_millis() as u64;
+
+    let mut response = result;
+    if let Some(obj) = response.as_object_mut() {
+        obj.insert("latency_ms".to_string(), json!(latency_ms));
+    }
+    Json(response)
+}
+
+async fn _test_provider_chat(
+    provider_type: &str,
+    config: ProviderConfig,
+    id: String,
+    test_msg: ChatMessage,
+    options: ChatOptions,
+) -> Value {
+    let provider: Box<dyn ChatProvider> = match provider_type {
+        "openai" => Box::new(astrbot_provider::OpenAiCompatibleProvider::new(config)),
+        "moonshot" => Box::new(astrbot_provider::sources::moonshot::create(config.api_key, config.model)),
+        "deepseek" => Box::new(astrbot_provider::sources::deepseek::create(config.api_key, config.model)),
+        "groq" => Box::new(astrbot_provider::sources::groq::create(config.api_key, config.model)),
+        "openrouter" => Box::new(astrbot_provider::sources::openrouter::create(config.api_key, config.model)),
+        "siliconflow" => Box::new(astrbot_provider::sources::siliconflow::create(config.api_key, config.model)),
+        "zhipu" => Box::new(astrbot_provider::sources::zhipu::create(config.api_key, config.model)),
+        "xai" => Box::new(astrbot_provider::sources::xai::create(config.api_key, config.model)),
+        "minimax" => Box::new(astrbot_provider::sources::minimax::create(config.api_key, config.model)),
+        "volcengine" => Box::new(astrbot_provider::sources::volcengine::create(config.api_key, config.model)),
+        "qwen" => Box::new(astrbot_provider::sources::qwen::create(config.api_key, config.model)),
+        "stepfun" => Box::new(astrbot_provider::sources::stepfun::create(config.api_key, config.model)),
+        "hyperbolic" => Box::new(astrbot_provider::sources::hyperbolic::create(config.api_key, config.model)),
+        "oneapi" => Box::new(astrbot_provider::sources::oneapi::create(config.base_url, config.api_key, config.model)),
+        "lmstudio" => Box::new(astrbot_provider::sources::lmstudio::create(config.base_url, config.model)),
+        _ => {
+            return json!({
+                "success": false,
+                "provider": id,
+                "error": format!("Provider type '{}' not supported", provider_type),
+                "message": "Provider test failed"
+            });
+        }
+    };
+
+    match provider.chat(vec![test_msg], options).await {
+        Ok(reply) => {
+            json!({
+                "success": true,
+                "provider": id,
+                "reply_preview": reply.chars().take(100).collect::<String>(),
+                "message": "Provider is online and responding"
+            })
+        }
+        Err(e) => {
+            json!({
+                "success": false,
+                "provider": id,
+                "error": e.to_string(),
+                "message": "Provider test failed"
+            })
+        }
+    }
 }
 
 // ========== 平台适配器 ==========

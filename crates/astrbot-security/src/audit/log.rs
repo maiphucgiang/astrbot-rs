@@ -56,7 +56,7 @@ impl AuditLogger {
 
     /// Log a new audit entry
     pub fn log(
-0026self, level: AuditLevel, actor: &str, action: &str, resource: &str, success: bool, details: Option<&str>, ip: Option<&str>) {
+        &self, level: AuditLevel, actor: &str, action: &str, resource: &str, success: bool, details: Option<&str>, ip: Option<&str>) {
         let entry = AuditEntry {
             id: uuid::Uuid::new_v4().to_string(),
             timestamp: Utc::now(),

@@ -24,9 +24,9 @@ pub async fn rate_limit_middleware(
         RateLimitResult::Allowed => next.run(request).await,
         RateLimitResult::Blocked { retry_after } => {
             let mut response = StatusCode::TOO_MANY_REQUESTS.into_response();
-            if let Ok(headers) = response.headers_mut().try_entry("retry-after") {
-                headers.insert(retry_after.to_string().parse().unwrap());
-            }
+            let headers = response.headers_mut();
+            let val = axum::http::HeaderValue::from_str(&retry_after.to_string()).unwrap();
+            headers.insert(axum::http::header::RETRY_AFTER, val);
             response
         }
     }
