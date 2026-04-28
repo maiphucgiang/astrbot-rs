@@ -9,8 +9,19 @@ repository = { workspace = true }
 
 [dependencies]
 astrbot-core = { path = "../astrbot-core" }
+astrbot-dashboard = { path = "../astrbot-dashboard" }
+astrbot-provider = { path = "../astrbot-provider" }
+astrbot-platform = { path = "../astrbot-platform" }
+astrbot-plugin = { path = "../astrbot-plugin" }
+astrbot-security = { path = "../astrbot-security" }
+astrbot-persona = { path = "../astrbot-persona" }
+astrbot-ux = { path = "../astrbot-ux" }
 tokio = { workspace = true }
 clap = { version = "4.5", features = ["derive"] }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
 
 [[bin]]
 name = "astrbot"
