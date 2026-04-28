@@ -9,3 +9,6 @@ pub mod zhipu;
 pub mod xai;
 pub mod minimax;
 pub mod volcengine;
+pub mod qwen;
+pub mod stepfun;
+pub mod hyperbolic;

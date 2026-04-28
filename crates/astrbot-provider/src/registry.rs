@@ -48,6 +48,15 @@ impl ProviderRegistry {
         registry.register("volcengine", |c| {
             Box::new(crate::sources::volcengine::create(c.api_key, c.model))
         });
+        registry.register("qwen", |c| {
+            Box::new(crate::sources::qwen::create(c.api_key, c.model))
+        });
+        registry.register("stepfun", |c| {
+            Box::new(crate::sources::stepfun::create(c.api_key, c.model))
+        });
+        registry.register("hyperbolic", |c| {
+            Box::new(crate::sources::hyperbolic::create(c.api_key, c.model))
+        });
 
         registry
     }
