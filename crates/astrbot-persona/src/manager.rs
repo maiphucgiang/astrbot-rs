@@ -342,8 +342,11 @@ impl PersonaManager {
     fn find_persona_by_keyword(&self, keyword: &str) -> Option<String> {
         let guard = self.personas.lock().unwrap();
         for (id, persona) in guard.iter() {
-            let combined = format!("{} {} {} {}
-            , persona.name, persona.description, persona.system_prompt, persona.tone.join(" "));
+            let tone_str = persona.tone.join(" ");
+            let combined = format!(
+                "{} {} {} {}",
+                persona.name, persona.description, persona.system_prompt, tone_str
+            );
             if combined.contains(keyword) {
                 return Some(id.clone());
             }
