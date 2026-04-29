@@ -95,6 +95,22 @@ impl TemplateRegistry {
                 default_model: "qwen-turbo".to_string(),
                 extra: HashMap::new(),
             },
+            ProviderTemplate {
+                id: "hunyuan".to_string(),
+                name: "Tencent Hunyuan".to_string(),
+                provider_type: "hunyuan".to_string(),
+                base_url: Some("https://hunyuan.tencentcloudapi.com/compatible-mode/v1".to_string()),
+                default_model: "hunyuan-lite".to_string(),
+                extra: HashMap::new(),
+            },
+            ProviderTemplate {
+                id: "spark".to_string(),
+                name: "iFlytek Spark".to_string(),
+                provider_type: "spark".to_string(),
+                base_url: Some("https://spark-api-open.xf-yun.com/v1".to_string()),
+                default_model: "generalv3.5".to_string(),
+                extra: HashMap::new(),
+            },
         ];
         for t in builtins {
             self.templates.insert(t.id.clone(), t);
@@ -151,7 +167,7 @@ mod tests {
         assert!(registry.get("kimi").is_some());
         assert!(registry.get("deepseek").is_some());
         assert!(registry.get("baidu").is_some());
-        assert_eq!(registry.list().len(), 8);
+        assert_eq!(registry.list().len(), 10);
     }
 
     #[test]

@@ -21,3 +21,5 @@ pub mod perplexity;
 pub mod together;
 pub mod zerooneai;
 pub mod baidu;
+pub mod hunyuan;
+pub mod spark;

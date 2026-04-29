@@ -57,6 +57,15 @@ impl ProviderRegistry {
         registry.register("hyperbolic", |c| {
             Box::new(crate::sources::hyperbolic::create(c.api_key, c.model))
         });
+        registry.register("baidu", |c| {
+            Box::new(crate::sources::baidu::create(c.api_key, c.model))
+        });
+        registry.register("hunyuan", |c| {
+            Box::new(crate::sources::hunyuan::create(c.api_key, c.model))
+        });
+        registry.register("spark", |c| {
+            Box::new(crate::sources::spark::create(c.api_key, c.model))
+        });
 
         registry
     }

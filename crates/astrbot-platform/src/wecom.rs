@@ -395,7 +395,7 @@ fn decrypt_wecom_message(encoding_aes_key: &str, encrypt: &str, corp_id: &str) -
         .map_err(|e| format!("cipher init failed: {:?}", e))?;
     let mut buf = encrypted_data.clone();
     let decrypted = decryptor
-        .decrypt_padded_mut::\u003cPkcs7\u003e(&mut buf)
+        .decrypt_padded_mut::<Pkcs7>(&mut buf)
         .map_err(|e| format!("decrypt failed: {:?}", e))?;
     if decrypted.len() < 20 {
         return Err("decrypted data too short".to_string());

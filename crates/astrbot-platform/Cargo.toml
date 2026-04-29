@@ -24,3 +24,4 @@ base64 = "0.22"
 aes = "0.8"
 cbc = { version = "0.1", features = ["block-padding", "alloc"] }
 sha1 = "0.10"
+axum = { workspace = true }
