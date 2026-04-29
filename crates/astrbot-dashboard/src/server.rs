@@ -897,7 +897,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
 
                 match provider_result {
                     Ok(provider) => {
-                        let test_msg = ChatMessage::user(user_message.clone());
+                        let test_msg = ChatMessage::user(&user_message);
                         let options = ChatOptions::default();
                         match provider.chat(vec![test_msg], options).await {
                             Ok(reply_text) => reply_text,

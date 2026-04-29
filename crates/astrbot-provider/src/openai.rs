@@ -164,6 +164,7 @@ impl Provider for OpenAiProvider {
                 total_tokens: resp.usage.total_tokens,
             }),
             reasoning: None,
+            tool_calls: None,
         })
     }
 

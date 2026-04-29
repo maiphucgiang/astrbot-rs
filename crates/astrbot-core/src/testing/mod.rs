@@ -153,6 +153,7 @@ impl Provider for MockProvider {
             model: self.models_list.first().cloned().unwrap_or_else(|| "mock".to_string()),
             usage: None,
             reasoning: None,
+            tool_calls: None,
         })
     }
 
@@ -214,8 +215,8 @@ pub struct MockPlatformAdapter {
     incoming_tx: tokio::sync::mpsc::Sender<MockIncomingMessage>,
     incoming_rx: Mutex<Option<tokio::sync::mpsc::Receiver<MockIncomingMessage>>>,
     outgoing: Mutex<Vec<(String, MessageChain)>>,
-    running: AtomicBool,
-    connected: AtomicBool,
+    running: Arc<AtomicBool>,
+    connected: Arc<AtomicBool>,
     handler: Arc<Mutex<HandlerRef>>,
     loop_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
@@ -239,7 +240,7 @@ impl MockPlatformAdapter {
     /// Create a new mock adapter. Returns `(adapter, shared)`.
     pub fn new(id: impl Into<String>, name: impl Into<String>) -> (Self, MockAdapterShared) {
         let (tx, rx) = tokio::sync::mpsc::channel(100);
-        let shared = MockAdapterShared { tx };
+        let shared = MockAdapterShared { tx: tx.clone() };
         let adapter = Self {
             metadata: PlatformMetadata {
                 id: id.into(),
@@ -248,11 +249,11 @@ impl MockPlatformAdapter {
                 enabled: true,
                 extra: HashMap::new(),
             },
-            incoming_tx: tx.clone(),
+            incoming_tx: tx,
             incoming_rx: Mutex::new(Some(rx)),
             outgoing: Mutex::new(Vec::new()),
-            running: AtomicBool::new(false),
-            connected: AtomicBool::new(false),
+            running: Arc::new(AtomicBool::new(false)),
+            connected: Arc::new(AtomicBool::new(false)),
             handler: Arc::new(Mutex::new(None)),
             loop_handle: Mutex::new(None),
         };
@@ -278,8 +279,8 @@ impl MockPlatformAdapter {
             })?
         };
 
-        let running = Arc::new(self.running.clone());
-        let connected = Arc::new(self.connected.clone());
+        let running = Arc::clone(&self.running);
+        let connected = Arc::clone(&self.connected);
         let handler = Arc::clone(&self.handler);
 
         let handle = tokio::spawn(async move {

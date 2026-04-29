@@ -198,6 +198,8 @@ Safety score:"#,
                 role: "user".to_string(),
                 content: prompt,
                 name: None,
+                tool_call_id: None,
+                tool_calls: None,
             },
         ];
 

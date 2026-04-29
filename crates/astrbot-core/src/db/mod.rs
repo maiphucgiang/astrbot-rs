@@ -273,6 +273,8 @@ impl Database {
                 role: r.role,
                 content: r.content,
                 name: r.user_id,
+                tool_call_id: None,
+                tool_calls: None,
             })
             .collect();
 
