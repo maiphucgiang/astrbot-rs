@@ -1,7 +1,8 @@
 use axum::{
     Router,
     routing::{get, post, put, delete},
-    extract::{Path, State, Query},
+    extract::{Path, State, Query, WebSocketUpgrade},
+    extract::ws::{WebSocket, Message as WsMessage},
     Json,
 };
 use astrbot_core::config::AstrBotConfig;
@@ -135,8 +136,13 @@ fn build_router(state: AppState) -> Router {
         .route("/api/settings/:key", get(get_setting).put(update_setting))
         // 日志
         .route("/api/logs", get(get_logs))
+        // WebChat WebSocket
+        .route("/ws/chat", get(chat_ws_handler))
         // 静态文件（dashboard SPA）
-        .fallback_service(tower_http::services::ServeDir::new("./dashboard/dist"))
+        .fallback_service(
+            tower_http::services::ServeDir::new("./dashboard/dist")
+                .fallback(tower_http::services::ServeFile::new("./dashboard/dist/index.html"))
+        )
         .with_state(state)
 }
 
@@ -768,4 +774,172 @@ async fn update_setting(
 async fn get_logs(State(state): State<AppState>) -> Json<Value> {
     let logs = state.logs.read().await;
     Json(json!({"logs": logs.clone(), "count": logs.len(), "max_retained": 1000}))
+}
+
+// ========== WebChat WebSocket ==========
+
+async fn chat_ws_handler(
+    State(state): State<AppState>,
+    ws: WebSocketUpgrade,
+) -> axum::response::Response {
+    ws.on_upgrade(|socket| handle_socket(socket, state))
+}
+
+async fn handle_socket(mut socket: WebSocket, state: AppState) {
+    use astrbot_provider::ChatProvider;
+    use uuid::Uuid;
+
+    while let Some(Ok(msg)) = socket.recv().await {
+        if let WsMessage::Text(text) = msg {
+            let req: Value = match serde_json::from_str(&text) {
+                Ok(v) => v,
+                Err(_) => {
+                    let _ = socket.send(WsMessage::Text(json!({
+                        "error": "Invalid JSON"
+                    }).to_string())).await;
+                    continue;
+                }
+            };
+
+            let user_message = req.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let session_id = req.get("session_id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("webchat_{}", Uuid::new_v4()));
+
+            if user_message.is_empty() {
+                let _ = socket.send(WsMessage::Text(json!({
+                    "error": "message is required"
+                }).to_string())).await;
+                continue;
+            }
+
+            // Save user message to session (in-memory)
+            {
+                let mut sessions = state.sessions.write().await;
+                let session = sessions.iter_mut().find(|s| {
+                    s.get("id").and_then(|v| v.as_str()) == Some(&session_id)
+                });
+                if let Some(s) = session {
+                    if let Some(obj) = s.as_object_mut() {
+                        let msgs = obj.entry("messages").or_insert_with(|| json!([]));
+                        if let Some(arr) = msgs.as_array_mut() {
+                            arr.push(json!({
+                                "id": format!("msg_{}", Uuid::new_v4()),
+                                "role": "user",
+                                "content": user_message.clone(),
+                                "created_at": chrono::Utc::now().to_rfc3339()
+                            }));
+                        }
+                    }
+                } else {
+                    sessions.push(json!({
+                        "id": session_id.clone(),
+                        "platform": "webchat",
+                        "chat_id": session_id.clone(),
+                        "title": Some(format!("WebChat {}", &session_id[..8.min(session_id.len())])),
+                        "created_at": chrono::Utc::now().to_rfc3339(),
+                        "updated_at": chrono::Utc::now().to_rfc3339(),
+                        "messages": [
+                            {
+                                "id": format!("msg_{}", Uuid::new_v4()),
+                                "role": "user",
+                                "content": user_message.clone(),
+                                "created_at": chrono::Utc::now().to_rfc3339()
+                            }
+                        ]
+                    }));
+                }
+            }
+
+            // Find default provider and chat
+            let provider_cfg = {
+                let providers = state.providers.read().await;
+                providers.iter().find(|p| {
+                    p.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true)
+                }).cloned()
+            };
+
+            let reply = if let Some(cfg) = provider_cfg {
+                let provider_type = cfg.get("provider_type").and_then(|v| v.as_str()).unwrap_or("openai");
+                let api_key = cfg.get("api_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let base_url = cfg.get("base_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let model = cfg.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let name = cfg.get("name").and_then(|v| v.as_str()).unwrap_or(provider_type).to_string();
+
+                let config = ProviderConfig {
+                    name: name.clone(),
+                    base_url,
+                    api_key,
+                    model: model.clone(),
+                    extra_headers: None,
+                };
+
+                let provider_result: Result<Box<dyn ChatProvider>, String> = match provider_type {
+                    "openai" => Ok(Box::new(astrbot_provider::OpenAiCompatibleProvider::new(config))),
+                    "moonshot" => Ok(Box::new(astrbot_provider::sources::moonshot::create(config.api_key, config.model))),
+                    "deepseek" => Ok(Box::new(astrbot_provider::sources::deepseek::create(config.api_key, config.model))),
+                    "groq" => Ok(Box::new(astrbot_provider::sources::groq::create(config.api_key, config.model))),
+                    "openrouter" => Ok(Box::new(astrbot_provider::sources::openrouter::create(config.api_key, config.model))),
+                    "siliconflow" => Ok(Box::new(astrbot_provider::sources::siliconflow::create(config.api_key, config.model))),
+                    "zhipu" => Ok(Box::new(astrbot_provider::sources::zhipu::create(config.api_key, config.model))),
+                    "xai" => Ok(Box::new(astrbot_provider::sources::xai::create(config.api_key, config.model))),
+                    "minimax" => Ok(Box::new(astrbot_provider::sources::minimax::create(config.api_key, config.model))),
+                    "volcengine" => Ok(Box::new(astrbot_provider::sources::volcengine::create(config.api_key, config.model))),
+                    "qwen" => Ok(Box::new(astrbot_provider::sources::qwen::create(config.api_key, config.model))),
+                    "stepfun" => Ok(Box::new(astrbot_provider::sources::stepfun::create(config.api_key, config.model))),
+                    "hyperbolic" => Ok(Box::new(astrbot_provider::sources::hyperbolic::create(config.api_key, config.model))),
+                    "oneapi" => Ok(Box::new(astrbot_provider::sources::oneapi::create(config.base_url, config.api_key, config.model))),
+                    "lmstudio" => Ok(Box::new(astrbot_provider::sources::lmstudio::create(config.base_url, config.model))),
+                    _ => Err(format!("[Provider type '{}' not supported in WebChat]", provider_type))
+                };
+
+                match provider_result {
+                    Ok(provider) => {
+                        let test_msg = ChatMessage::user(user_message.clone());
+                        let options = ChatOptions::default();
+                        match provider.chat(vec![test_msg], options).await {
+                            Ok(reply_text) => reply_text,
+                            Err(e) => format!("[Error: {}]", e),
+                        }
+                    }
+                    Err(err_msg) => err_msg
+                }
+            } else {
+                "[No provider configured. Please add a provider in Dashboard.]".to_string()
+            };
+
+            // Save assistant reply to session
+            {
+                let mut sessions = state.sessions.write().await;
+                if let Some(s) = sessions.iter_mut().find(|s| {
+                    s.get("id").and_then(|v| v.as_str()) == Some(&session_id)
+                }) {
+                    if let Some(obj) = s.as_object_mut() {
+                        let msgs = obj.entry("messages").or_insert_with(|| json!([]));
+                        if let Some(arr) = msgs.as_array_mut() {
+                            arr.push(json!({
+                                "id": format!("msg_{}", Uuid::new_v4()),
+                                "role": "assistant",
+                                "content": reply.clone(),
+                                "created_at": chrono::Utc::now().to_rfc3339()
+                            }));
+                        }
+                        obj.insert("updated_at".to_string(), json!(chrono::Utc::now().to_rfc3339()));
+                    }
+                }
+            }
+
+            let resp = json!({
+                "reply": reply,
+                "session_id": session_id,
+                "role": "assistant",
+                "done": true
+            });
+
+            if socket.send(WsMessage::Text(resp.to_string())).await.is_err() {
+                break;
+            }
+        }
+    }
 }

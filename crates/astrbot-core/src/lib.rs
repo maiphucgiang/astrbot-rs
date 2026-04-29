@@ -30,6 +30,7 @@ pub mod utils;
 pub mod vector_store;
 pub mod voice;
 pub mod wasm;
+pub mod testing;
 
 pub use event::*;
 pub use message::*;

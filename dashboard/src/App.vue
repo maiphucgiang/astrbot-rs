@@ -30,6 +30,10 @@
           <el-icon><Clock /></el-icon>
           <span>消息历史</span>
         </el-menu-item>
+        <el-menu-item index="/chat">
+          <el-icon><ChatDotRound /></el-icon>
+          <span>WebChat</span>
+        </el-menu-item>
         <el-menu-item index="/config">
           <el-icon><Setting /></el-icon>
           <span>配置</span>

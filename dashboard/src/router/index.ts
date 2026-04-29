@@ -48,6 +48,12 @@ const routes = [
     name: 'Config',
     component: () => import('@/views/Config.vue'),
     meta: { title: '配置管理' }
+  },
+  {
+    path: '/chat',
+    name: 'Chat',
+    component: () => import('@/views/Chat.vue'),
+    meta: { title: 'WebChat' }
   }
 ]
 

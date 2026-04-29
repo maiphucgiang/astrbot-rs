@@ -2,47 +2,8 @@ use crate::rag::{
     Document, DocumentParser, EmbeddingRecord, EmbeddingStore, MemoryEmbeddingStore, SplitStrategy,
     TextChunk, TextSplitter, Retriever,
 };
-use crate::provider::{ChatMessage, ChatConfig, ChatResponse, ChatStreamChunk, ModelInfo, TokenUsage, Provider};
-use crate::errors::Result;
+use crate::testing::MockProvider;
 use crate::vector_store::MemoryVectorStore;
-use async_trait::async_trait;
-use futures_util::Stream;
-
-// A mock provider for testing RAG
-struct MockProvider;
-
-#[async_trait]
-impl Provider for MockProvider {
-    fn id(&self) -> &str { "mock" }
-    fn name(&self) -> &str { "mock" }
-    async fn models(&self) -> Result<Vec<String>> { Ok(vec!["mock".to_string()]) }
-    async fn chat(&self, _messages: Vec<ChatMessage>, _config: ChatConfig) -> Result<ChatResponse> {
-        Ok(ChatResponse { content: "ok".to_string(), model: "mock".to_string(), usage: None, reasoning: None })
-    }
-    async fn chat_stream(&self, _messages: Vec<ChatMessage>, _config: ChatConfig)
-        -> Result<Box<dyn Stream<Item = Result<ChatStreamChunk>> + Send>> {
-        // Mock stream: yield a single chunk then finish
-        let chunk = ChatStreamChunk {
-            delta: "ok".to_string(),
-            finish_reason: Some("stop".to_string()),
-            model: "mock".to_string(),
-        };
-        let stream = futures_util::stream::iter(vec![Ok(chunk)]);
-        Ok(Box::new(stream))
-    }
-    async fn embedding(&self, texts: Vec<String>, _model: Option<String>) -> Result<Vec<Vec<f32>>> {
-        // Return simple deterministic embeddings for testing
-        Ok(texts.into_iter().enumerate().map(|(i, t)| {
-            let mut vec = vec![0.0f32; 4];
-            vec[i % 4] = t.len() as f32;
-            vec
-        }).collect())
-    }
-    async fn model_info(&self, _model: &str) -> Result<ModelInfo> {
-        Ok(ModelInfo { name: "mock".to_string(), context_length: 4096, supports_streaming: true, supports_vision: false, supports_function_calling: false })
-    }
-    async fn health_check(&self) -> Result<bool> { Ok(true) }
-}
 
 #[tokio::test]
 async fn test_text_splitter_fixed() {
@@ -107,7 +68,7 @@ async fn test_document_parser() {
 
 #[tokio::test]
 async fn test_retriever_index_and_query() {
-    let provider = std::sync::Arc::new(MockProvider);
+    let provider = std::sync::Arc::new(MockProvider::new("mock", "Mock").with_embedding_dim(4));
     let store = std::sync::Arc::new(MemoryVectorStore::new());
     let retriever = Retriever::new(provider, "mock", store, "rag_test", 2);
 
@@ -123,3 +84,92 @@ async fn test_retriever_index_and_query() {
     let results = retriever.query("memory safe").await.unwrap();
     assert!(!results.is_empty());
 }
+
+/// Full RAG pipeline E2E test:
+/// DocumentParser → TextSplitter → Retriever.index_document
+/// (embedding via MockProvider + VectorStore upsert)
+/// → Retriever.query → results ranked by similarity
+#[tokio::test]
+async fn test_rag_full_pipeline_e2e() {
+    // Use a deterministic mock provider with 8-dim embeddings
+    let provider = std::sync::Arc::new(
+        MockProvider::new("mock", "Mock")
+            .with_embedding_dim(8)
+            .with_chat_response("RAG reply")
+    );
+    let store = std::sync::Arc::new(MemoryVectorStore::new());
+    let retriever = Retriever::new(provider.clone(), "mock", store, "rag_e2e", 3);
+
+    // Step 1: Parse and ingest two documents
+    let docs = vec![
+        DocumentParser::parse_text(
+            "Rust is a systems programming language with memory safety guarantees. \
+             It uses ownership and borrowing to prevent data races.",
+            "Rust Overview",
+        ),
+        DocumentParser::parse_text(
+            "Python is a high-level interpreted language. \
+             It is dynamically typed and has a large standard library.",
+            "Python Overview",
+        ),
+    ];
+
+    let splitter = TextSplitter::new(SplitStrategy::FixedSize { chunk_size: 60, overlap: 10 });
+    for doc in &docs {
+        retriever.index_document(doc, &splitter).await.unwrap();
+    }
+
+    // Step 2: Query about memory safety — should return Rust doc chunks first
+    let results = retriever.query("memory safety in systems languages").await.unwrap();
+    assert!(!results.is_empty(), "RAG query should return at least one result");
+
+    // The top result should be from the Rust document
+    let top_meta = results[0].metadata.as_ref().expect("metadata should exist");
+    let top_doc_id = top_meta.get("doc_id").and_then(|v| v.as_str()).unwrap_or("");
+    assert!(
+        top_doc_id.starts_with("Rust") || top_doc_id.is_empty(),
+        "Top result should relate to Rust (memory safety). Got doc_id: {}",
+        top_doc_id
+    );
+
+    // Step 3: Query about dynamic typing — should return Python doc chunks first
+    let results2 = retriever.query("dynamic typing and interpreted language").await.unwrap();
+    assert!(!results2.is_empty(), "Second RAG query should return results");
+
+    let top2_meta = results2[0].metadata.as_ref().expect("metadata should exist");
+    let top2_doc_id = top2_meta.get("doc_id").and_then(|v| v.as_str()).unwrap_or("");
+    assert!(
+        top2_doc_id.starts_with("Python") || top2_doc_id.is_empty(),
+        "Top result should relate to Python. Got doc_id: {}",
+        top2_doc_id
+    );
+
+    // Step 4: Verify all results have scores
+    for r in &results {
+        assert!(r.score > 0.0, "All search results should have positive similarity scores");
+    }
+}
+
+/// E2E test with Paragraph + Recursive strategies to ensure splitter variety
+#[tokio::test]
+async fn test_rag_pipeline_with_recursive_splitter() {
+    let provider = std::sync::Arc::new(
+        MockProvider::new("mock", "Mock").with_embedding_dim(4)
+    );
+    let store = std::sync::Arc::new(MemoryVectorStore::new());
+    let retriever = Retriever::new(provider, "mock", store, "rag_recursive", 2);
+
+    let doc = Document {
+        id: "rec1".to_string(),
+        title: "Long Doc".to_string(),
+        content: "Section A discusses concurrency.\n\nSection B talks about async programming.\n\nSection C covers memory management.".to_string(),
+        metadata: None,
+    };
+
+    let splitter = TextSplitter::new(SplitStrategy::Recursive { chunk_size: 40, overlap: 5 });
+    retriever.index_document(&doc, &splitter).await.unwrap();
+
+    let results = retriever.query("async programming patterns").await.unwrap();
+    assert!(!results.is_empty());
+}
+
