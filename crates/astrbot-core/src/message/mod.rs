@@ -31,6 +31,18 @@ pub struct MessageMember {
     pub is_self: bool,
 }
 
+impl Default for MessageMember {
+    fn default() -> Self {
+        Self {
+            user_id: String::new(),
+            nickname: None,
+            card: None,
+            role: None,
+            is_self: false,
+        }
+    }
+}
+
 /// A component within a message chain
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -202,6 +214,21 @@ pub struct AstrBotMessage {
     /// Raw platform-specific payload (for debugging / advanced use)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_payload: Option<serde_json::Value>,
+}
+
+impl Default for AstrBotMessage {
+    fn default() -> Self {
+        Self {
+            message_id: String::new(),
+            timestamp: Utc::now(),
+            platform: PlatformType::Custom,
+            session_id: String::new(),
+            sender: MessageMember::default(),
+            message_type: MessageType::Unknown,
+            chain: MessageChain::default(),
+            raw_payload: None,
+        }
+    }
 }
 
 /// Handler for incoming messages from platform adapters

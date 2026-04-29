@@ -326,3 +326,6 @@ pub fn preset_engine() -> SafetyEngine {
         .add_strategy(Box::new(keyword_filter))
         .add_strategy(Box::new(regex_filter))
 }
+
+pub mod baidu;
+pub use baidu::BaiduContentSafety;

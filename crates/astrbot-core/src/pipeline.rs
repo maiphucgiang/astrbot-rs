@@ -474,20 +474,68 @@ impl Stage for RateLimitStage {
 }
 
 // ---------------------------------------------------------------------------
-// 5. ContentSafetyCheckStage — stub
+// 5. ContentSafetyCheckStage — content safety (Baidu + keyword + regex)
 // ---------------------------------------------------------------------------
 
-pub struct ContentSafetyCheckStage;
+pub struct ContentSafetyCheckStage {
+    engine: crate::safety::SafetyEngine,
+    /// If true, stop the event on violation (discard message).
+    /// If false, mark as unsafe but allow processing (for logging/auditing).
+    stop_on_violation: bool,
+}
+
+impl Default for ContentSafetyCheckStage {
+    fn default() -> Self {
+        Self {
+            engine: crate::safety::preset_engine(),
+            stop_on_violation: true,
+        }
+    }
+}
+
+impl ContentSafetyCheckStage {
+    /// Create with a custom safety engine (e.g. including BaiduContentSafety).
+    pub fn with_engine(engine: crate::safety::SafetyEngine) -> Self {
+        Self {
+            engine,
+            stop_on_violation: true,
+        }
+    }
+
+    /// Configure stop-on-violation behavior.
+    pub fn with_stop_on_violation(mut self, stop: bool) -> Self {
+        self.stop_on_violation = stop;
+        self
+    }
+}
 
 #[async_trait]
 impl Stage for ContentSafetyCheckStage {
     async fn initialize(&mut self, _ctx: &PipelineContext) -> Result<()> {
+        // TODO: load from astrbot_config — e.g. baidu_client_id/secret, enable/disable
         Ok(())
     }
 
-    async fn process(&self, _event: &mut PipelineEvent) -> Result<StageFlow> {
-        // TODO: StrategySelector.check(text) — Baidu / local
-        // Onion model for pre/post check
+    async fn process(&self, event: &mut PipelineEvent) -> Result<StageFlow> {
+        let chain = &event.message.chain;
+
+        match self.engine.first_violation(chain).await {
+            Some(reason) => {
+                warn!(
+                    "[ContentSafetyCheckStage] violation detected for session {}: {}",
+                    event.message.session_id, reason
+                );
+                if self.stop_on_violation {
+                    event.stop_event();
+                }
+                // Store violation reason in extras for downstream logging
+                event.set_extra("safety_violation", reason);
+            }
+            None => {
+                // Content is safe — continue
+            }
+        }
+
         Ok(StageFlow::Wrap)
     }
 }
@@ -666,5 +714,90 @@ mod tests {
         let mut event2 = PipelineEvent::new(message2);
         scheduler.execute(&mut event2).await.unwrap();
         assert!(event2.is_stopped());
+    }
+
+    #[tokio::test]
+    async fn test_content_safety_allows_safe_content() {
+        let ctx = Arc::new(PipelineContext::new());
+        let mut registry = StageRegistry::new();
+
+        let engine = crate::safety::SafetyEngine::new()
+            .add_strategy(Box::new(crate::safety::KeywordFilter::new(
+                "keyword",
+                vec!["badword".to_string()],
+                false,
+            )));
+        let safety = ContentSafetyCheckStage::with_engine(engine);
+
+        registry.register("ContentSafetyCheckStage", Box::new(safety));
+        registry.initialize_all(&ctx).await.unwrap();
+
+        let scheduler = PipelineScheduler::new(ctx, registry);
+        let mut message = AstrBotMessage::default();
+        message.chain = crate::message::MessageChain::new().text("hello world this is safe");
+        let mut event = PipelineEvent::new(message);
+
+        scheduler.execute(&mut event).await.unwrap();
+        assert!(!event.is_stopped(), "Safe content should not be stopped");
+    }
+
+    #[tokio::test]
+    async fn test_content_safety_blocks_violation() {
+        let ctx = Arc::new(PipelineContext::new());
+        let mut registry = StageRegistry::new();
+
+        let engine = crate::safety::SafetyEngine::new()
+            .add_strategy(Box::new(crate::safety::KeywordFilter::new(
+                "keyword",
+                vec!["badword".to_string()],
+                false,
+            )));
+        let safety = ContentSafetyCheckStage::with_engine(engine);
+
+        registry.register("ContentSafetyCheckStage", Box::new(safety));
+        registry.initialize_all(&ctx).await.unwrap();
+
+        let scheduler = PipelineScheduler::new(ctx, registry);
+        let mut message = AstrBotMessage::default();
+        message.chain = crate::message::MessageChain::new().text("this contains badword in it");
+        let mut event = PipelineEvent::new(message);
+
+        scheduler.execute(&mut event).await.unwrap();
+        assert!(event.is_stopped(), "Content with blocked keyword should be stopped");
+        assert!(
+            event.get_extra("safety_violation").is_some(),
+            "Violation reason should be recorded in extras"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_content_safety_audit_mode_no_stop() {
+        let ctx = Arc::new(PipelineContext::new());
+        let mut registry = StageRegistry::new();
+
+        let engine = crate::safety::SafetyEngine::new()
+            .add_strategy(Box::new(crate::safety::KeywordFilter::new(
+                "keyword",
+                vec!["badword".to_string()],
+                false,
+            )));
+        let safety = ContentSafetyCheckStage::with_engine(engine)
+            .with_stop_on_violation(false);
+
+        registry.register("ContentSafetyCheckStage", Box::new(safety));
+        registry.initialize_all(&ctx).await.unwrap();
+
+        let scheduler = PipelineScheduler::new(ctx, registry);
+        let mut message = AstrBotMessage::default();
+        message.chain = crate::message::MessageChain::new().text("this contains badword in it");
+        let mut event = PipelineEvent::new(message);
+
+        scheduler.execute(&mut event).await.unwrap();
+        // In audit mode, event is NOT stopped but violation is recorded
+        assert!(!event.is_stopped(), "Audit mode should not stop event");
+        assert!(
+            event.get_extra("safety_violation").is_some(),
+            "Violation reason should still be recorded in audit mode"
+        );
     }
 }

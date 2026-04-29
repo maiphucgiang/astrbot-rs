@@ -273,6 +273,95 @@ impl Tool for CurrentTimeTool {
 }
 
 // ---------------------------------------------------------------------------
+// Web Search Tool
+// ---------------------------------------------------------------------------
+
+pub struct WebSearchTool {
+    definition: ToolDefinition,
+    engine: std::sync::Arc<dyn crate::search::SearchEngine>,
+}
+
+impl WebSearchTool {
+    pub fn new(engine: std::sync::Arc<dyn crate::search::SearchEngine>) -> Self {
+        Self {
+            definition: ToolDefinition {
+                name: "web_search".to_string(),
+                description: "Search the web for information. Returns a list of search results with title, URL, and snippet.".to_string(),
+                parameters: vec![
+                    ToolParameter {
+                        name: "query".to_string(),
+                        description: "The search query string".to_string(),
+                        param_type: "string".to_string(),
+                        required: true,
+                        default: None,
+                        enum_values: None,
+                    },
+                    ToolParameter {
+                        name: "max_results".to_string(),
+                        description: "Maximum number of results to return (1-10, default 5)".to_string(),
+                        param_type: "number".to_string(),
+                        required: false,
+                        default: Some(serde_json::json!(5)),
+                        enum_values: None,
+                    },
+                ],
+                returns: Some("string".to_string()),
+                requires_confirmation: false,
+            },
+            engine,
+        }
+    }
+
+    /// Create with a Brave Search API key (convenience constructor)
+    pub fn with_brave(api_key: impl Into<String>) -> Self {
+        let engine = std::sync::Arc::new(crate::search::BraveSearch::new(api_key));
+        Self::new(engine)
+    }
+
+    /// Create with a Tavily API key (convenience constructor)
+    pub fn with_tavily(api_key: impl Into<String>) -> Self {
+        let engine = std::sync::Arc::new(crate::search::TavilySearch::new(api_key));
+        Self::new(engine)
+    }
+}
+
+#[async_trait]
+impl Tool for WebSearchTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
+    }
+
+    async fn execute(&self, arguments: &Value) -> Result<ToolResult> {
+        let query = arguments
+            .get("query")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| AstrBotError::Validation("Missing required parameter: query".to_string()))?;
+
+        let max_results = arguments
+            .get("max_results")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize)
+            .unwrap_or(5)
+            .clamp(1, 10);
+
+        match self.engine.search(query, max_results).await {
+            Ok(results) => {
+                let formatted = crate::search::format_search_context(query, &results);
+                Ok(ToolResult::Success {
+                    output: Value::String(formatted),
+                })
+            }
+            Err(e) => {
+                warn!("[WebSearchTool] search failed: {}", e);
+                Ok(ToolResult::Error {
+                    message: format!("Web search failed: {}", e),
+                })
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Function call parser (OpenAI format)
 // ---------------------------------------------------------------------------
 
@@ -394,5 +483,49 @@ mod tests {
         let calls = parse_openai_tool_calls(json);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].name, "echo");
+    }
+
+    #[tokio::test]
+    async fn test_web_search_tool_definition() {
+        let tool = WebSearchTool::with_brave("invalid-key-for-test");
+        let def = tool.definition();
+        assert_eq!(def.name, "web_search");
+        assert_eq!(def.parameters.len(), 2);
+        assert!(def.parameters.iter().any(|p| p.name == "query" && p.required));
+        assert!(def.parameters.iter().any(|p| p.name == "max_results" && !p.required));
+    }
+
+    #[tokio::test]
+    async fn test_web_search_tool_with_invalid_key_returns_error() {
+        // Using an invalid Brave key — the tool should gracefully return ToolResult::Error
+        let tool = WebSearchTool::with_brave("invalid-key-for-test");
+        let result = tool
+            .execute(&serde_json::json!({"query": "rust programming", "max_results": 3}))
+            .await
+            .unwrap();
+        assert!(
+            matches!(result, ToolResult::Error { .. }),
+            "Expected error result with invalid API key, got {:?}",
+            result
+        );
+    }
+
+    #[tokio::test]
+    async fn test_web_search_tool_missing_query_param() {
+        let tool = WebSearchTool::with_brave("invalid-key-for-test");
+        let result = tool.execute(&serde_json::json!({"max_results": 3})).await;
+        assert!(result.is_err(), "Expected validation error for missing query");
+    }
+
+    #[test]
+    fn test_web_search_tool_openai_schema() {
+        let tool = WebSearchTool::with_brave("test-key");
+        let schema = tool.definition().to_openai_schema();
+        let func = schema.get("function").unwrap();
+        assert_eq!(func.get("name").unwrap(), "web_search");
+        let params = func.get("parameters").unwrap();
+        let props = params.get("properties").unwrap().as_object().unwrap();
+        assert!(props.contains_key("query"));
+        assert!(props.contains_key("max_results"));
     }
 }
