@@ -21,7 +21,14 @@ impl Provider for MockProvider {
     }
     async fn chat_stream(&self, _messages: Vec<ChatMessage>, _config: ChatConfig)
         -> Result<Box<dyn Stream<Item = Result<ChatStreamChunk>> + Send>> {
-        unimplemented!()
+        // Mock stream: yield a single chunk then finish
+        let chunk = ChatStreamChunk {
+            delta: "ok".to_string(),
+            finish_reason: Some("stop".to_string()),
+            model: "mock".to_string(),
+        };
+        let stream = futures_util::stream::iter(vec![Ok(chunk)]);
+        Ok(Box::new(stream))
     }
     async fn embedding(&self, texts: Vec<String>, _model: Option<String>) -> Result<Vec<Vec<f32>>> {
         // Return simple deterministic embeddings for testing

@@ -323,7 +323,7 @@ pub fn preset_engine() -> SafetyEngine {
     );
 
     let mut regex_filter = RegexFilter::new("regex");
-    // Example: detect URLs (skeleton)
+    // Detect URLs using regex pattern
     let _ = regex_filter.add_pattern(
         r"https?://[^\s]+",
         "external URL detected",

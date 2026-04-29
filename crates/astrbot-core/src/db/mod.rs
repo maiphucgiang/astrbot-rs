@@ -279,6 +279,17 @@ impl Database {
         Ok(messages)
     }
 
+    /// Delete messages by session ID
+    pub async fn delete_by_session_id(&self, session_id: &str) -> Result<u64> {
+        let result = sqlx::query("DELETE FROM message_history WHERE session_id = ?")
+            .bind(session_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AstrBotError::Internal(format!("Failed to delete messages by session: {}", e)))?;
+
+        Ok(result.rows_affected())
+    }
+
     /// Delete old messages
     pub async fn delete_old_messages(&self, before: DateTime<Utc>) -> Result<u64> {
         let before_str = before.to_rfc3339();

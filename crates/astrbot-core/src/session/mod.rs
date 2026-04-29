@@ -176,11 +176,10 @@ impl SessionManager {
     /// Clear session history
     pub async fn clear_session(
         &self,
-        _source: &MessageSource,
+        source: &MessageSource,
     ) -> Result<u64> {
-        // TODO: Add delete_by_session_id method to Database for efficiency
-        let before = chrono::Utc::now();
-        self.db.delete_old_messages(before).await
+        let session_id = Self::session_id(source);
+        self.db.delete_by_session_id(&session_id).await
     }
 }
 
