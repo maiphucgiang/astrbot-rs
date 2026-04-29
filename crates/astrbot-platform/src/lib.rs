@@ -7,4 +7,5 @@ pub mod matrix;
 pub mod misskey;
 pub mod qq;
 pub mod telegram;
+pub mod wechat_personal;
 pub mod framework;
