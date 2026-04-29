@@ -79,7 +79,9 @@ impl CommandRegistry {
             name: "help".to_string(),
             category: CommandCategory::System,
             description: "查看帮助信息".to_string(),
-            long_description: "显示 AstrBot 的指令帮助。支持快速概览、完整列表、单指令详情和关键词搜索。".to_string(),
+            long_description:
+                "显示 AstrBot 的指令帮助。支持快速概览、完整列表、单指令详情和关键词搜索。"
+                    .to_string(),
             usage: vec![
                 "/help — 快速概览".to_string(),
                 "/help all — 完整指令列表".to_string(),
@@ -117,7 +119,8 @@ impl CommandRegistry {
             name: "persona".to_string(),
             category: CommandCategory::Persona,
             description: "切换 bot 人格".to_string(),
-            long_description: "在预设的人格之间切换，如傲慢俏皮型、温和陪伴型、毒舌吐槽型等。".to_string(),
+            long_description: "在预设的人格之间切换，如傲慢俏皮型、温和陪伴型、毒舌吐槽型等。"
+                .to_string(),
             usage: vec![
                 "/persona — 列出可用人格".to_string(),
                 "/persona 傲娇 — 切换到指定人格".to_string(),
@@ -131,7 +134,9 @@ impl CommandRegistry {
             name: "status".to_string(),
             category: CommandCategory::System,
             description: "显示各平台/Provider 健康状态".to_string(),
-            long_description: "查看所有已连接平台和 LLM Provider 的运行状态，包括在线/离线、响应延迟等信息。".to_string(),
+            long_description:
+                "查看所有已连接平台和 LLM Provider 的运行状态，包括在线/离线、响应延迟等信息。"
+                    .to_string(),
             usage: vec![
                 "/status — 查看全部状态".to_string(),
                 "/status qq — 查看指定平台状态".to_string(),
@@ -188,7 +193,8 @@ impl CommandRegistry {
             name: "tools".to_string(),
             category: CommandCategory::Tool,
             description: "列出可用工具".to_string(),
-            long_description: "查看当前可用的外部工具（MCP servers、插件提供的工具等）。".to_string(),
+            long_description: "查看当前可用的外部工具（MCP servers、插件提供的工具等）。"
+                .to_string(),
             usage: vec![
                 "/tools — 列出所有工具".to_string(),
                 "/tools search weather — 搜索工具".to_string(),
@@ -232,14 +238,19 @@ impl CommandRegistry {
 
     pub fn all(&self) -> Vec<&CommandInfo> {
         let mut cmds: Vec<_> = self.commands.values().collect();
-        cmds.sort_by(|a, b| a.category.to_string().cmp(&b.category.to_string())
-            .then_with(|| a.name.cmp(&b.name)));
+        cmds.sort_by(|a, b| {
+            a.category
+                .to_string()
+                .cmp(&b.category.to_string())
+                .then_with(|| a.name.cmp(&b.name))
+        });
         cmds
     }
 
     pub fn search(&self, keyword: &str) -> Vec<&CommandInfo> {
         let kw = keyword.to_lowercase();
-        self.commands.values()
+        self.commands
+            .values()
             .filter(|c| {
                 c.name.to_lowercase().contains(&kw)
                     || c.description.to_lowercase().contains(&kw)
@@ -250,7 +261,9 @@ impl CommandRegistry {
     }
 
     pub fn by_category(&self, category: &CommandCategory) -> Vec<&CommandInfo> {
-        let mut cmds: Vec<_> = self.commands.values()
+        let mut cmds: Vec<_> = self
+            .commands
+            .values()
             .filter(|c| std::mem::discriminant(&c.category) == std::mem::discriminant(category))
             .collect();
         cmds.sort_by_key(|c| &c.name);
@@ -406,10 +419,7 @@ impl HelpSystem {
         ];
 
         for cmd in cmds {
-            lines.push(format!(
-                "  /{:<12} {}",
-                cmd.name, cmd.description
-            ));
+            lines.push(format!("  /{:<12} {}", cmd.name, cmd.description));
         }
 
         lines.push("\n输入 /help <指令名> 查看详细用法".to_string());

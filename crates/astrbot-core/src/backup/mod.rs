@@ -2,9 +2,9 @@
 //!
 //! Provides database + configuration backup and restore functionality.
 
-use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
+use std::path::{Path, PathBuf};
 use tokio::fs;
 
 use crate::errors::{AstrBotError, Result};
@@ -46,18 +46,18 @@ impl BackupManager {
     /// The backup is stored in a timestamped subdirectory under `backup_dir`.
     pub async fn create_backup(&self, db_path: &Path, config: &Value) -> Result<BackupInfo> {
         // Ensure backup directory exists
-        fs::create_dir_all(&self.backup_dir)
-            .await
-            .map_err(|e| AstrBotError::Internal(format!("Failed to create backup directory: {}", e)))?;
+        fs::create_dir_all(&self.backup_dir).await.map_err(|e| {
+            AstrBotError::Internal(format!("Failed to create backup directory: {}", e))
+        })?;
 
         let timestamp = Utc::now();
         let id = timestamp.format("backup_%Y%m%d_%H%M%S").to_string();
         let backup_path = self.backup_dir.join(&id);
 
         // Create backup subdirectory
-        fs::create_dir_all(&backup_path)
-            .await
-            .map_err(|e| AstrBotError::Internal(format!("Failed to create backup subdirectory: {}", e)))?;
+        fs::create_dir_all(&backup_path).await.map_err(|e| {
+            AstrBotError::Internal(format!("Failed to create backup subdirectory: {}", e))
+        })?;
 
         // Copy database file
         let db_backup_path = backup_path.join("astrbot.db");
@@ -72,8 +72,9 @@ impl BackupManager {
 
         // Write config JSON
         let config_backup_path = backup_path.join("config.json");
-        let config_json = serde_json::to_string_pretty(config)
-            .map_err(|e| AstrBotError::Serialization(format!("Failed to serialize config: {}", e)))?;
+        let config_json = serde_json::to_string_pretty(config).map_err(|e| {
+            AstrBotError::Serialization(format!("Failed to serialize config: {}", e))
+        })?;
         fs::write(&config_backup_path, config_json)
             .await
             .map_err(|e| AstrBotError::Internal(format!("Failed to write config backup: {}", e)))?;
@@ -106,9 +107,9 @@ impl BackupManager {
             return Ok(backups);
         }
 
-        let mut entries = fs::read_dir(&self.backup_dir)
-            .await
-            .map_err(|e| AstrBotError::Internal(format!("Failed to read backup directory: {}", e)))?;
+        let mut entries = fs::read_dir(&self.backup_dir).await.map_err(|e| {
+            AstrBotError::Internal(format!("Failed to read backup directory: {}", e))
+        })?;
 
         while let Some(entry) = entries
             .next_entry()
@@ -150,10 +151,7 @@ impl BackupManager {
             let config_path = path.join("config.json");
 
             let db_size_bytes = if db_path.exists() {
-                fs::metadata(&db_path)
-                    .await
-                    .map(|m| m.len())
-                    .unwrap_or(0)
+                fs::metadata(&db_path).await.map(|m| m.len()).unwrap_or(0)
             } else {
                 0
             };
@@ -192,9 +190,9 @@ impl BackupManager {
 
         // Ensure target directory exists
         if let Some(parent) = target_db_path.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .map_err(|e| AstrBotError::Internal(format!("Failed to create target directory: {}", e)))?;
+            fs::create_dir_all(parent).await.map_err(|e| {
+                AstrBotError::Internal(format!("Failed to create target directory: {}", e))
+            })?;
         }
 
         fs::copy(&backup_path, target_db_path)
@@ -249,7 +247,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_backup() {
-        let temp_dir = std::env::temp_dir().join(format!("astrbot_backup_test_{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("astrbot_backup_test_{}", std::process::id()));
         let backup_dir = temp_dir.join("backups");
         let db_path = temp_dir.join("astrbot.db");
 
@@ -265,7 +264,10 @@ mod tests {
         assert!(info.id.starts_with("backup_"));
         assert_eq!(info.db_size_bytes, 16); // "fake sqlite data".len()
         assert!(info.config_size_bytes > 0);
-        assert_eq!(info.total_size_bytes, info.db_size_bytes + info.config_size_bytes);
+        assert_eq!(
+            info.total_size_bytes,
+            info.db_size_bytes + info.config_size_bytes
+        );
 
         // Verify files exist
         assert!(backup_dir.join(&info.id).join("astrbot.db").exists());
@@ -277,7 +279,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_backups() {
-        let temp_dir = std::env::temp_dir().join(format!("astrbot_list_test_{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("astrbot_list_test_{}", std::process::id()));
         let backup_dir = temp_dir.join("backups");
         let db_path = temp_dir.join("astrbot.db");
 
@@ -308,13 +311,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_restore_backup() {
-        let temp_dir = std::env::temp_dir().join(format!("astrbot_restore_test_{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("astrbot_restore_test_{}", std::process::id()));
         let backup_dir = temp_dir.join("backups");
         let original_db = temp_dir.join("original.db");
         let restored_db = temp_dir.join("restored.db");
 
         fs::create_dir_all(&temp_dir).await.unwrap();
-        fs::write(&original_db, b"original database content v1").await.unwrap();
+        fs::write(&original_db, b"original database content v1")
+            .await
+            .unwrap();
 
         let manager = BackupManager::new(&backup_dir, 5);
         let config = json!({"version": 1});
@@ -322,10 +328,15 @@ mod tests {
         let info = manager.create_backup(&original_db, &config).await.unwrap();
 
         // Modify original
-        fs::write(&original_db, b"modified database content").await.unwrap();
+        fs::write(&original_db, b"modified database content")
+            .await
+            .unwrap();
 
         // Restore
-        manager.restore_backup(&info.id, &restored_db).await.unwrap();
+        manager
+            .restore_backup(&info.id, &restored_db)
+            .await
+            .unwrap();
 
         // Verify restored matches the backed-up version
         let restored_content = fs::read(&restored_db).await.unwrap();
@@ -337,7 +348,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup_old_backups() {
-        let temp_dir = std::env::temp_dir().join(format!("astrbot_cleanup_test_{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("astrbot_cleanup_test_{}", std::process::id()));
         let backup_dir = temp_dir.join("backups");
         let db_path = temp_dir.join("astrbot.db");
 
@@ -373,7 +385,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_backup() {
-        let temp_dir = std::env::temp_dir().join(format!("astrbot_delete_test_{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("astrbot_delete_test_{}", std::process::id()));
         let backup_dir = temp_dir.join("backups");
         let db_path = temp_dir.join("astrbot.db");
 

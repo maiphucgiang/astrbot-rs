@@ -1,9 +1,12 @@
-use async_trait::async_trait;
-use astrbot_core::errors::{AstrBotError, Result};
-use astrbot_core::message::{AstrBotMessage, MessageChain, MessageComponent, MessageMember, MessageType, HandlerRef, MessageHandler};
-use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
-use astrbot_core::net::SharedHttpClient;
 use crate::adapter::PlatformAdapter;
+use astrbot_core::errors::{AstrBotError, Result};
+use astrbot_core::message::{
+    AstrBotMessage, HandlerRef, MessageChain, MessageComponent, MessageHandler, MessageMember,
+    MessageType,
+};
+use astrbot_core::net::SharedHttpClient;
+use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -241,7 +244,10 @@ impl MisskeyAdapter {
                 enabled: true,
                 extra: {
                     let mut map = HashMap::new();
-                    map.insert("instance_url".to_string(), serde_json::Value::String(instance_url.clone()));
+                    map.insert(
+                        "instance_url".to_string(),
+                        serde_json::Value::String(instance_url.clone()),
+                    );
                     map
                 },
             },
@@ -263,7 +269,10 @@ impl PlatformAdapter for MisskeyAdapter {
     }
 
     async fn initialize(&mut self) -> Result<()> {
-        info!("[Misskey] Initializing adapter for {}...", self.instance_url);
+        info!(
+            "[Misskey] Initializing adapter for {}...",
+            self.instance_url
+        );
         // Verify token by calling /api/i
         let req = ICheckRequest {
             i: self.api_token.clone(),
@@ -347,7 +356,10 @@ impl PlatformAdapter for MisskeyAdapter {
             reply_id: None,
         };
 
-        let url = format!("{}/api/notes/create", self.instance_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/api/notes/create",
+            self.instance_url.trim_end_matches('/')
+        );
         let response = self
             .http_client
             .post(&url)
@@ -385,7 +397,10 @@ impl PlatformAdapter for MisskeyAdapter {
             reply_id: Some(original.message_id.clone()),
         };
 
-        let url = format!("{}/api/notes/create", self.instance_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/api/notes/create",
+            self.instance_url.trim_end_matches('/')
+        );
         let response = self
             .http_client
             .post(&url)
@@ -426,10 +441,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_misskey_lifecycle() {
-        let mut adapter = MisskeyAdapter::new(
-            "https://misskey.io".to_string(),
-            "test-token".to_string(),
-        );
+        let mut adapter =
+            MisskeyAdapter::new("https://misskey.io".to_string(), "test-token".to_string());
         assert_eq!(adapter.metadata().platform_type, PlatformType::Misskey);
         // initialize will fail with test token, skip in unit test
         // adapter.initialize().await.unwrap();
@@ -463,7 +476,9 @@ mod tests {
     #[test]
     fn test_chain_to_misskey_text() {
         let mut chain = MessageChain::new();
-        chain.0.push(MessageComponent::Plain { text: "hi ".to_string() });
+        chain.0.push(MessageComponent::Plain {
+            text: "hi ".to_string(),
+        });
         chain.0.push(MessageComponent::At {
             target: "user1".to_string(),
             display: Some("Alice".to_string()),

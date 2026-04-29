@@ -7,7 +7,10 @@ pub fn create(api_key: String, model: String) -> OpenAiCompatibleProvider {
         api_key,
         model,
         extra_headers: Some(vec![
-            ("HTTP-Referer".to_string(), "https://astrbot.com".to_string()),
+            (
+                "HTTP-Referer".to_string(),
+                "https://astrbot.com".to_string(),
+            ),
             ("X-Title".to_string(), "AstrBot".to_string()),
         ]),
     })

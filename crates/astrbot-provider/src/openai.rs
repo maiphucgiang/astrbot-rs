@@ -1,9 +1,8 @@
-use async_trait::async_trait;
 use astrbot_core::errors::{AstrBotError, Result};
 use astrbot_core::provider::{
-    ChatMessage, ChatConfig, ChatResponse, ChatStreamChunk, ModelInfo, TokenUsage,
-    Provider,
+    ChatConfig, ChatMessage, ChatResponse, ChatStreamChunk, ModelInfo, Provider, TokenUsage,
 };
+use async_trait::async_trait;
 use futures_util::Stream;
 use serde::{Deserialize, Serialize};
 
@@ -107,8 +106,12 @@ struct OpenAIEmbedding {
 
 #[async_trait]
 impl Provider for OpenAiProvider {
-    fn id(&self) -> &str { &self.id }
-    fn name(&self) -> &str { &self.name }
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
 
     async fn models(&self) -> Result<Vec<String>> {
         Ok(vec![self.default_model.clone()])
@@ -116,8 +119,12 @@ impl Provider for OpenAiProvider {
 
     async fn chat(&self, messages: Vec<ChatMessage>, config: ChatConfig) -> Result<ChatResponse> {
         let model = config.model.unwrap_or_else(|| self.default_model.clone());
-        let req_messages: Vec<OpenAIMessage> = messages.into_iter()
-            .map(|m| OpenAIMessage { role: m.role, content: m.content })
+        let req_messages: Vec<OpenAIMessage> = messages
+            .into_iter()
+            .map(|m| OpenAIMessage {
+                role: m.role,
+                content: m.content,
+            })
             .collect();
 
         let request = OpenAIRequest {
@@ -130,7 +137,8 @@ impl Provider for OpenAiProvider {
         };
 
         let url = format!("{}/v1/chat/completions", self.base_url);
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", self.auth_header())
             .json(&request)
@@ -147,10 +155,13 @@ impl Provider for OpenAiProvider {
             });
         }
 
-        let resp: OpenAIResponse = response.json().await
-            .map_err(|e| AstrBotError::Serialization(format!("Failed to parse OpenAI response: {}", e)))?;
+        let resp: OpenAIResponse = response.json().await.map_err(|e| {
+            AstrBotError::Serialization(format!("Failed to parse OpenAI response: {}", e))
+        })?;
 
-        let content = resp.choices.into_iter()
+        let content = resp
+            .choices
+            .into_iter()
             .next()
             .map(|c| c.message.content)
             .unwrap_or_default();
@@ -174,8 +185,12 @@ impl Provider for OpenAiProvider {
         config: ChatConfig,
     ) -> Result<Box<dyn Stream<Item = Result<ChatStreamChunk>> + Send>> {
         let model = config.model.unwrap_or_else(|| self.default_model.clone());
-        let req_messages: Vec<OpenAIMessage> = messages.into_iter()
-            .map(|m| OpenAIMessage { role: m.role, content: m.content })
+        let req_messages: Vec<OpenAIMessage> = messages
+            .into_iter()
+            .map(|m| OpenAIMessage {
+                role: m.role,
+                content: m.content,
+            })
             .collect();
 
         let request = OpenAIRequest {
@@ -188,7 +203,8 @@ impl Provider for OpenAiProvider {
         };
 
         let url = format!("{}/v1/chat/completions", self.base_url);
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", self.auth_header())
             .json(&request)
@@ -206,21 +222,20 @@ impl Provider for OpenAiProvider {
         }
 
         let model_name = self.default_model.clone();
-        
+
         // Use a custom stream that processes SSE events
         let stream = futures_util::stream::unfold(
             (response, model_name, String::new()),
             |(mut response, model_name, mut buffer)| async move {
-                
                 match response.chunk().await {
                     Ok(Some(chunk)) => {
                         let text = String::from_utf8_lossy(&chunk);
                         buffer.push_str(&text);
-                        
+
                         let mut delta = String::new();
                         let mut finish_reason = None;
                         let mut remaining = String::new();
-                        
+
                         for line in buffer.lines() {
                             if line.is_empty() {
                                 continue;
@@ -231,7 +246,9 @@ impl Provider for OpenAiProvider {
                                     finish_reason = Some("stop".to_string());
                                     continue;
                                 }
-                                if let Ok(parsed) = serde_json::from_str::<OpenAIStreamResponse>(data) {
+                                if let Ok(parsed) =
+                                    serde_json::from_str::<OpenAIStreamResponse>(data)
+                                {
                                     if let Some(choice) = parsed.choices.into_iter().next() {
                                         if let Some(content) = choice.delta.content {
                                             delta.push_str(&content);
@@ -246,9 +263,9 @@ impl Provider for OpenAiProvider {
                                 remaining.push('\n');
                             }
                         }
-                        
+
                         buffer = remaining;
-                        
+
                         if !delta.is_empty() || finish_reason.is_some() {
                             let chunk = ChatStreamChunk {
                                 delta,
@@ -258,15 +275,21 @@ impl Provider for OpenAiProvider {
                             Some((Ok(chunk), (response, model_name, buffer)))
                         } else {
                             // Continue reading
-                            Some((Ok(ChatStreamChunk {
-                                delta: String::new(),
-                                finish_reason: None,
-                                model: model_name.clone(),
-                            }), (response, model_name, buffer)))
+                            Some((
+                                Ok(ChatStreamChunk {
+                                    delta: String::new(),
+                                    finish_reason: None,
+                                    model: model_name.clone(),
+                                }),
+                                (response, model_name, buffer),
+                            ))
                         }
                     }
                     Ok(None) => None, // Stream ended
-                    Err(e) => Some((Err(AstrBotError::Network(format!("Stream error: {}", e))), (response, model_name, buffer))),
+                    Err(e) => Some((
+                        Err(AstrBotError::Network(format!("Stream error: {}", e))),
+                        (response, model_name, buffer),
+                    )),
                 }
             },
         );
@@ -281,13 +304,16 @@ impl Provider for OpenAiProvider {
             "input": texts,
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", self.auth_header())
             .json(&request_body)
             .send()
             .await
-            .map_err(|e| AstrBotError::Network(format!("OpenAI embedding request failed: {}", e)))?;
+            .map_err(|e| {
+                AstrBotError::Network(format!("OpenAI embedding request failed: {}", e))
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -298,8 +324,9 @@ impl Provider for OpenAiProvider {
             });
         }
 
-        let resp: OpenAIEmbeddingResponse = response.json().await
-            .map_err(|e| AstrBotError::Serialization(format!("Failed to parse embedding response: {}", e)))?;
+        let resp: OpenAIEmbeddingResponse = response.json().await.map_err(|e| {
+            AstrBotError::Serialization(format!("Failed to parse embedding response: {}", e))
+        })?;
 
         Ok(resp.data.into_iter().map(|d| d.embedding).collect())
     }
@@ -319,13 +346,15 @@ impl Provider for OpenAiProvider {
             context_length,
             supports_streaming: true,
             supports_vision: model.contains("vision") || model.contains("4o"),
-            supports_function_calling: model.starts_with("gpt-4") || model.starts_with("gpt-3.5-turbo"),
+            supports_function_calling: model.starts_with("gpt-4")
+                || model.starts_with("gpt-3.5-turbo"),
         })
     }
 
     async fn health_check(&self) -> Result<bool> {
         let url = format!("{}/v1/models", self.base_url);
-        match self.client
+        match self
+            .client
             .get(&url)
             .header("Authorization", self.auth_header())
             .send()

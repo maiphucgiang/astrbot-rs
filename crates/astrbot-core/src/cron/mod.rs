@@ -24,17 +24,15 @@ pub enum JobAction {
 impl std::fmt::Debug for JobAction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            JobAction::SendMessage { target, text } => {
-                f.debug_struct("SendMessage")
-                    .field("target", target)
-                    .field("text", text)
-                    .finish()
-            }
-            JobAction::ExecuteCommand { command } => {
-                f.debug_struct("ExecuteCommand")
-                    .field("command", command)
-                    .finish()
-            }
+            JobAction::SendMessage { target, text } => f
+                .debug_struct("SendMessage")
+                .field("target", target)
+                .field("text", text)
+                .finish(),
+            JobAction::ExecuteCommand { command } => f
+                .debug_struct("ExecuteCommand")
+                .field("command", command)
+                .finish(),
             JobAction::Custom(_) => f.debug_struct("Custom").finish(),
         }
     }
@@ -51,8 +49,9 @@ impl Clone for JobAction {
                 command: command.clone(),
             },
             JobAction::Custom(_) => {
-                let dummy: Arc<dyn Fn() -> Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync> =
-                    Arc::new(|| Box::pin(async {}));
+                let dummy: Arc<
+                    dyn Fn() -> Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync,
+                > = Arc::new(|| Box::pin(async {}));
                 JobAction::Custom(dummy)
             }
         }
@@ -73,7 +72,12 @@ pub struct CronJob {
 
 impl CronJob {
     /// Create a new cron job
-    pub fn new(id: impl Into<String>, name: impl Into<String>, schedule: SchedulePreset, action: JobAction) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        schedule: SchedulePreset,
+        action: JobAction,
+    ) -> Self {
         Self {
             id: id.into(),
             name: name.into(),
@@ -113,7 +117,8 @@ impl SchedulePreset {
     /// Check if the job is due based on last_run time
     pub fn is_due(&self, last_run: Option<DateTime<Utc>>) -> bool {
         let now = Utc::now();
-        let last = last_run.unwrap_or_else(|| DateTime::from_timestamp(0, 0).unwrap_or(DateTime::UNIX_EPOCH));
+        let last = last_run
+            .unwrap_or_else(|| DateTime::from_timestamp(0, 0).unwrap_or(DateTime::UNIX_EPOCH));
         let elapsed = now.signed_duration_since(last);
 
         match self {
@@ -237,7 +242,10 @@ impl CronScheduler {
         let mut jobs = self.jobs.write().await;
         let job_id = job.id.clone();
         if jobs.contains_key(&job_id) {
-            return Err(AstrBotError::Config(format!("Job '{}' already exists", job_id)));
+            return Err(AstrBotError::Config(format!(
+                "Job '{}' already exists",
+                job_id
+            )));
         }
         jobs.insert(job_id.clone(), job);
         info!("Added cron job: {}", job_id);
@@ -269,7 +277,8 @@ impl CronScheduler {
     /// Enable/disable a job
     pub async fn set_job_enabled(&self, id: &str, enabled: bool) -> Result<()> {
         let mut jobs = self.jobs.write().await;
-        let job = jobs.get_mut(id)
+        let job = jobs
+            .get_mut(id)
             .ok_or_else(|| AstrBotError::Config(format!("Job '{}' not found", id)))?;
         job.enabled = enabled;
         Ok(())

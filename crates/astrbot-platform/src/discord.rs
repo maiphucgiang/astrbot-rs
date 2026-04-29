@@ -1,9 +1,13 @@
-use async_trait::async_trait;
-use astrbot_core::errors::{AstrBotError, Result};
-use astrbot_core::message::{AstrBotMessage, MessageChain, MessageComponent, MessageMember, MessageType, MessageHandler};
-use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
-use astrbot_core::net::SharedHttpClient;
 use crate::adapter::PlatformAdapter;
+use astrbot_core::errors::{AstrBotError, Result};
+use astrbot_core::message::{
+    AstrBotMessage, MessageChain, MessageComponent, MessageHandler, MessageMember, MessageType,
+};
+use astrbot_core::net::SharedHttpClient;
+use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
+use async_trait::async_trait;
+use chrono::Utc;
+use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -11,8 +15,6 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
-use futures_util::{SinkExt, StreamExt};
-use chrono::Utc;
 
 // ---------------------------------------------------------------------------
 // Discord Gateway data models
@@ -133,7 +135,8 @@ impl DiscordAdapter {
 
     /// Get gateway URL from Discord API
     async fn get_gateway_url(&self) -> Result<String> {
-        let resp = self.client
+        let resp = self
+            .client
             .get("https://discord.com/api/v10/gateway/bot")
             .header("Authorization", format!("Bot {}", self.bot_token))
             .send()
@@ -148,22 +151,27 @@ impl DiscordAdapter {
             message: format!("gateway json parse failed: {}", e),
         })?;
 
-        let url = data.get("url")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| AstrBotError::Platform {
-                adapter: "discord".to_string(),
-                message: "gateway url missing".to_string(),
-            })?;
+        let url =
+            data.get("url")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| AstrBotError::Platform {
+                    adapter: "discord".to_string(),
+                    message: "gateway url missing".to_string(),
+                })?;
 
         Ok(format!("{}?v=10&encoding=json", url))
     }
 
     /// Send a message to a Discord channel
     async fn send_channel_message(&self, channel_id: &str, content: &str) -> Result<()> {
-        let url = format!("https://discord.com/api/v10/channels/{}/messages", channel_id);
+        let url = format!(
+            "https://discord.com/api/v10/channels/{}/messages",
+            channel_id
+        );
         let body = serde_json::json!({ "content": content });
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bot {}", self.bot_token))
             .header("Content-Type", "application/json")
@@ -198,7 +206,12 @@ impl DiscordAdapter {
             session_id: msg.channel_id.clone(),
             sender: MessageMember {
                 user_id: msg.author.id.clone(),
-                nickname: Some(msg.author.global_name.clone().unwrap_or_else(|| msg.author.username.clone())),
+                nickname: Some(
+                    msg.author
+                        .global_name
+                        .clone()
+                        .unwrap_or_else(|| msg.author.username.clone()),
+                ),
                 card: None,
                 role: None,
                 is_self: false,
@@ -278,7 +291,10 @@ impl DiscordAdapter {
             }
         }
 
-        info!("[Discord] Hello received, heartbeat interval: {}ms", heartbeat_interval);
+        info!(
+            "[Discord] Hello received, heartbeat interval: {}ms",
+            heartbeat_interval
+        );
 
         // Send identify
         let identify = GatewayIdentify {
@@ -295,7 +311,11 @@ impl DiscordAdapter {
         };
 
         let identify_json = serde_json::to_string(&identify).unwrap();
-        let _ = write.send(tokio_tungstenite::tungstenite::Message::Text(identify_json.into())).await;
+        let _ = write
+            .send(tokio_tungstenite::tungstenite::Message::Text(
+                identify_json.into(),
+            ))
+            .await;
 
         // Start heartbeat task
         let heartbeat_running = running.clone();
@@ -326,7 +346,9 @@ impl DiscordAdapter {
                                 if let Some(event) = payload.event_name.as_deref() {
                                     if event == "MESSAGE_CREATE" {
                                         if let Some(data) = payload.data {
-                                            if let Ok(dmsg) = serde_json::from_value::<DiscordMessage>(data) {
+                                            if let Ok(dmsg) =
+                                                serde_json::from_value::<DiscordMessage>(data)
+                                            {
                                                 let ab_msg = DiscordAdapter::convert_message(&dmsg);
                                                 let s = shared.lock().await;
                                                 if let Some(ref handler) = s.handler {

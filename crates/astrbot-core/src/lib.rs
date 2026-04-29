@@ -1,4 +1,3 @@
-pub mod net;
 pub mod access;
 pub mod agent;
 pub mod backup;
@@ -9,34 +8,35 @@ pub mod db;
 pub mod errors;
 pub mod event;
 pub mod i18n;
+pub mod mcp;
 pub mod message;
 pub mod metrics;
-pub mod platform;
-pub mod provider;
-pub mod plugin;
+pub mod net;
 pub mod persona;
+pub mod platform;
+pub mod plugin;
 pub mod proactive;
+pub mod provider;
 pub mod rag;
-pub mod search;
-pub mod tools;
 pub mod safety;
-pub mod t2i;
-pub mod mcp;
-pub mod webhook;
-pub mod sse;
+pub mod search;
 pub mod session;
+pub mod sse;
+pub mod t2i;
+pub mod testing;
+pub mod tools;
 pub mod types;
 pub mod utils;
 pub mod vector_store;
 pub mod voice;
 pub mod wasm;
-pub mod testing;
+pub mod webhook;
 
+pub use config::*;
+pub use errors::*;
 pub use event::*;
 pub use message::*;
-pub use config::*;
 pub use types::*;
-pub use errors::*;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -63,12 +63,29 @@ pub struct SenderInfo {
 #[serde(tag = "type", content = "data")]
 pub enum MessageContent {
     Text(String),
-    Image { url: String, mime_type: Option<String> },
-    File { name: String, url: String, size: Option<u64> },
-    Voice { url: String, duration: Option<u64> },
-    Video { url: String, duration: Option<u64> },
-    At { target: String },
-    Reply { message_id: String },
+    Image {
+        url: String,
+        mime_type: Option<String>,
+    },
+    File {
+        name: String,
+        url: String,
+        size: Option<u64>,
+    },
+    Voice {
+        url: String,
+        duration: Option<u64>,
+    },
+    Video {
+        url: String,
+        duration: Option<u64>,
+    },
+    At {
+        target: String,
+    },
+    Reply {
+        message_id: String,
+    },
 }
 
 impl AstrMessage {

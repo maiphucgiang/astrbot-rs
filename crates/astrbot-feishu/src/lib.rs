@@ -29,8 +29,8 @@ pub mod search;
 // Re-export core types for convenience
 pub use auth::FeishuAuth;
 pub use calendar::{CalendarClient, ReminderConfig};
-pub use models::CalendarEventData;
 pub use knowledge::{BitableClient, DocClient, KnowledgeSource};
+pub use models::CalendarEventData;
 pub use models::*;
 pub use platform::{FeishuAdapter, FeishuAdapterConfig, MessageHandler};
 pub use search::{GroupMessageSearch, SearchQuery};

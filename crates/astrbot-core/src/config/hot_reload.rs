@@ -97,7 +97,10 @@ impl ConfigWatcher {
         let new_config = AstrBotConfig::from_file(&self.config_path).await?;
         let mut guard = self.current_config.write().await;
         *guard = new_config.clone();
-        let _ = self.change_tx.send(ConfigChange::Reloaded(new_config.clone())).await;
+        let _ = self
+            .change_tx
+            .send(ConfigChange::Reloaded(new_config.clone()))
+            .await;
         Ok(new_config)
     }
 }

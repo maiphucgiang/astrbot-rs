@@ -79,7 +79,11 @@ impl OpenAiCompatibleProvider {
 
     /// 构建 HTTP 请求的基础方法
     fn build_request(&self, endpoint: &str, body: serde_json::Value) -> reqwest::RequestBuilder {
-        let url = format!("{}/{}", self.config.base_url.trim_end_matches('/'), endpoint);
+        let url = format!(
+            "{}/{}",
+            self.config.base_url.trim_end_matches('/'),
+            endpoint
+        );
         let mut req = self
             .client
             .post(&url)
@@ -117,7 +121,10 @@ impl ChatProvider for OpenAiCompatibleProvider {
             "top_p": options.top_p.unwrap_or(1.0),
         });
 
-        let response = self.build_request("v1/chat/completions", body).send().await?;
+        let response = self
+            .build_request("v1/chat/completions", body)
+            .send()
+            .await?;
         let status = response.status();
 
         if !status.is_success() {
@@ -145,7 +152,8 @@ impl ChatProvider for OpenAiCompatibleProvider {
         &self,
         messages: Vec<ChatMessage>,
         options: ChatOptions,
-    ) -> Result<Box<dyn futures::Stream<Item = Result<String, ProviderError>> + Send>, ProviderError> {
+    ) -> Result<Box<dyn futures::Stream<Item = Result<String, ProviderError>> + Send>, ProviderError>
+    {
         let model = options.model.as_ref().unwrap_or(&self.config.model);
 
         let body = serde_json::json!({
@@ -157,7 +165,10 @@ impl ChatProvider for OpenAiCompatibleProvider {
             "stream": true,
         });
 
-        let response = self.build_request("v1/chat/completions", body).send().await?;
+        let response = self
+            .build_request("v1/chat/completions", body)
+            .send()
+            .await?;
         let status = response.status();
 
         if !status.is_success() {

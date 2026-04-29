@@ -3,17 +3,25 @@
 //! Supports HTTP callback mode for receiving messages.
 //! Reference: https://developers.weixin.qq.com/doc/offiaccount/en/Getting_Started/Overview.html
 
+use crate::adapter::PlatformAdapter;
+use astrbot_core::errors::{AstrBotError, Result};
+use astrbot_core::message::{
+    AstrBotMessage, HandlerRef, MessageChain, MessageComponent, MessageHandler, MessageMember,
+    MessageType,
+};
+use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
 use async_trait::async_trait;
-use axum::{extract::Query, routing::{get, post}, Router};
 use axum::extract::State;
 use axum::http::StatusCode;
-use astrbot_core::errors::{AstrBotError, Result};
-use astrbot_core::message::{AstrBotMessage, MessageChain, MessageComponent, MessageMember, MessageType, HandlerRef, MessageHandler};
-use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
-use crate::adapter::PlatformAdapter;
+use axum::{
+    extract::Query,
+    routing::{get, post},
+    Router,
+};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha1::Digest;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,7 +29,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
-use sha1::Digest;
 
 // ---------------------------------------------------------------------------
 // WeChat API models
@@ -127,7 +134,8 @@ impl WeixinShared {
             }
         }
 
-        let resp = self.http_client
+        let resp = self
+            .http_client
             .get("https://api.weixin.qq.com/cgi-bin/token")
             .query(&[
                 ("grant_type", "client_credential"),
@@ -138,23 +146,28 @@ impl WeixinShared {
             .await
             .map_err(|e| AstrBotError::Network(format!("Weixin token request: {}", e)))?;
 
-        let data: WeixinTokenResponse = resp.json().await
+        let data: WeixinTokenResponse = resp
+            .json()
+            .await
             .map_err(|e| AstrBotError::Serialization(format!("Weixin token parse: {}", e)))?;
 
         if let Some(errcode) = data.errcode {
             if errcode != 0 {
                 return Err(AstrBotError::Platform {
                     adapter: "weixin".to_string(),
-                    message: format!("Weixin token error {}: {}", errcode, data.errmsg.unwrap_or_default()),
+                    message: format!(
+                        "Weixin token error {}: {}",
+                        errcode,
+                        data.errmsg.unwrap_or_default()
+                    ),
                 });
             }
         }
 
-        let token = data.access_token
-            .ok_or_else(|| AstrBotError::Platform {
-                adapter: "weixin".to_string(),
-                message: "No access_token in response".to_string(),
-            })?;
+        let token = data.access_token.ok_or_else(|| AstrBotError::Platform {
+            adapter: "weixin".to_string(),
+            message: "No access_token in response".to_string(),
+        })?;
 
         let expire_at = chrono::Utc::now().timestamp() + data.expires_in.unwrap_or(7200);
 
@@ -177,7 +190,8 @@ impl WeixinShared {
             },
         };
 
-        let resp = self.http_client
+        let resp = self
+            .http_client
             .post(format!(
                 "https://api.weixin.qq.com/cgi-bin/message/custom/send?access_token={}",
                 token
@@ -200,7 +214,12 @@ impl WeixinShared {
     }
 
     async fn handle_verification(&self, query: WeixinVerifyQuery) -> Result<String> {
-        if Self::verify_signature(&self.token, &query.timestamp, &query.nonce, &query.signature) {
+        if Self::verify_signature(
+            &self.token,
+            &query.timestamp,
+            &query.nonce,
+            &query.signature,
+        ) {
             Ok(query.echostr.unwrap_or_default())
         } else {
             Err(AstrBotError::Platform {
@@ -211,9 +230,7 @@ impl WeixinShared {
     }
 
     async fn handle_message(&self, payload: WeixinMessagePayload) -> Result<()> {
-        let from_user = payload.from_user_name
-            .clone()
-            .unwrap_or_default();
+        let from_user = payload.from_user_name.clone().unwrap_or_default();
         let content = payload.content.clone().unwrap_or_default();
         let msg_id = payload.msg_id.clone().unwrap_or_default();
 
@@ -330,7 +347,8 @@ impl PlatformAdapter for WeixinAdapter {
             .with_state(shared);
 
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
-        let listener = tokio::net::TcpListener::bind(&addr).await
+        let listener = tokio::net::TcpListener::bind(&addr)
+            .await
             .map_err(|e| AstrBotError::Network(format!("Weixin bind failed: {}", e)))?;
 
         let task = tokio::spawn(async move {
@@ -362,7 +380,9 @@ impl PlatformAdapter for WeixinAdapter {
 
     async fn reply_message(&self, original: &AstrBotMessage, chain: &MessageChain) -> Result<()> {
         let content = chain.plain_text();
-        self.shared.send_message(&original.sender.user_id, &content).await
+        self.shared
+            .send_message(&original.sender.user_id, &content)
+            .await
     }
 
     async fn health_check(&self) -> Result<bool> {

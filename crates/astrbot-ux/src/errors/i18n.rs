@@ -399,14 +399,22 @@ mod tests {
 
     #[test]
     fn test_translate_by_code_en() {
-        let h = translate_by_code(&ErrorCode::ProviderInvalidKey, ErrorLevel::Error, Lang::English);
+        let h = translate_by_code(
+            &ErrorCode::ProviderInvalidKey,
+            ErrorLevel::Error,
+            Lang::English,
+        );
         assert_eq!(h.title, "Invalid API Key");
         assert!(h.suggestion.contains("dashboard"));
     }
 
     #[test]
     fn test_translate_by_code_jp() {
-        let h = translate_by_code(&ErrorCode::ProviderBalanceEmpty, ErrorLevel::Error, Lang::Japanese);
+        let h = translate_by_code(
+            &ErrorCode::ProviderBalanceEmpty,
+            ErrorLevel::Error,
+            Lang::Japanese,
+        );
         assert_eq!(h.title, "残高不足");
         assert!(h.suggestion.contains("Ollama"));
     }
@@ -446,7 +454,11 @@ mod tests {
             let h = translate_by_code(&code, ErrorLevel::Error, Lang::Chinese);
             assert!(!h.title.is_empty(), "ZH title empty for {:?}", code);
             assert!(!h.reason.is_empty(), "ZH reason empty for {:?}", code);
-            assert!(!h.suggestion.is_empty(), "ZH suggestion empty for {:?}", code);
+            assert!(
+                !h.suggestion.is_empty(),
+                "ZH suggestion empty for {:?}",
+                code
+            );
         }
     }
 

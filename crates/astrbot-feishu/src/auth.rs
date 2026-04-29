@@ -63,17 +63,18 @@ impl FeishuAuth {
 
         let resp = self
             .client
-            .post(format!("{}/auth/v3/tenant_access_token/internal", self.base_url))
+            .post(format!(
+                "{}/auth/v3/tenant_access_token/internal",
+                self.base_url
+            ))
             .json(&body)
             .send()
             .await
             .map_err(FeishuError::Http)?;
 
         let _status = resp.status();
-        let api_resp: ApiResponse<TokenResponseData> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: ApiResponse<TokenResponseData> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 || api_resp.data.is_none() {
             error!("Auth failed: {} - {}", api_resp.code, api_resp.msg);

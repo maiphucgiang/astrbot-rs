@@ -1,14 +1,21 @@
-use async_trait::async_trait;
-use astrbot_core::errors::{AstrBotError, Result};
-use astrbot_core::message::{AstrBotMessage, MessageChain, MessageComponent, MessageMember, MessageType, HandlerRef, MessageHandler};
-use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
 use crate::adapter::PlatformAdapter;
-use axum::{routing::post, Router};
+use astrbot_core::errors::{AstrBotError, Result};
+use astrbot_core::message::{
+    AstrBotMessage, HandlerRef, MessageChain, MessageComponent, MessageHandler, MessageMember,
+    MessageType,
+};
+use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
+use async_trait::async_trait;
 use axum::extract::State;
 use axum::http::StatusCode;
+use axum::{routing::post, Router};
+use base64::{engine::general_purpose, Engine as _};
+use cbc::cipher::block_padding::Pkcs7;
+use cbc::cipher::{BlockDecryptMut, KeyIvInit};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha1::{Digest, Sha1};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,10 +23,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
-use base64::{Engine as _, engine::general_purpose};
-use cbc::cipher::{BlockDecryptMut, KeyIvInit};
-use cbc::cipher::block_padding::Pkcs7;
-use sha1::{Sha1, Digest};
 
 // ---------------------------------------------------------------------------
 // WeCom API models
@@ -97,7 +100,8 @@ impl WeComShared {
             }
         }
 
-        let resp = self.http_client
+        let resp = self
+            .http_client
             .get("https://qyapi.weixin.qq.com/cgi-bin/gettoken")
             .query(&[
                 ("corpid", self.corp_id.as_str()),
@@ -107,23 +111,28 @@ impl WeComShared {
             .await
             .map_err(|e| AstrBotError::Network(format!("WeCom token request: {}", e)))?;
 
-        let data: WeComTokenResponse = resp.json().await
+        let data: WeComTokenResponse = resp
+            .json()
+            .await
             .map_err(|e| AstrBotError::Serialization(format!("WeCom token parse: {}", e)))?;
 
         if let Some(errcode) = data.errcode {
             if errcode != 0 {
                 return Err(AstrBotError::Platform {
                     adapter: "wecom".to_string(),
-                    message: format!("WeCom token error {}: {}", errcode, data.errmsg.unwrap_or_default()),
+                    message: format!(
+                        "WeCom token error {}: {}",
+                        errcode,
+                        data.errmsg.unwrap_or_default()
+                    ),
                 });
             }
         }
 
-        let token = data.access_token
-            .ok_or_else(|| AstrBotError::Platform {
-                adapter: "wecom".to_string(),
-                message: "No access_token in response".to_string(),
-            })?;
+        let token = data.access_token.ok_or_else(|| AstrBotError::Platform {
+            adapter: "wecom".to_string(),
+            message: "No access_token in response".to_string(),
+        })?;
 
         let expire_at = chrono::Utc::now().timestamp() + data.expires_in.unwrap_or(7200);
 
@@ -147,8 +156,12 @@ impl WeComShared {
             agent_id: self.agent_id,
         };
 
-        let resp = self.http_client
-            .post(format!("https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={}", token))
+        let resp = self
+            .http_client
+            .post(format!(
+                "https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={}",
+                token
+            ))
             .json(&body)
             .send()
             .await
@@ -237,7 +250,8 @@ impl PlatformAdapter for WeComAdapter {
             .with_state(shared);
 
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
-        let listener = tokio::net::TcpListener::bind(&addr).await
+        let listener = tokio::net::TcpListener::bind(&addr)
+            .await
             .map_err(|e| AstrBotError::Network(format!("WeCom bind failed: {}", e)))?;
 
         let task = tokio::spawn(async move {
@@ -269,7 +283,9 @@ impl PlatformAdapter for WeComAdapter {
 
     async fn reply_message(&self, original: &AstrBotMessage, chain: &MessageChain) -> Result<()> {
         let content = chain.plain_text();
-        self.shared.send_message(&original.sender.user_id, &content).await
+        self.shared
+            .send_message(&original.sender.user_id, &content)
+            .await
     }
 
     async fn health_check(&self) -> Result<bool> {
@@ -299,15 +315,18 @@ async fn wecom_callback_handler(
     let encrypt = payload.encrypt.unwrap_or_default();
     let msg_signature = payload.msg_signature.unwrap_or_default();
     let echostr = payload.echostr.unwrap_or_default();
-    
+
     let token = match &shared.token {
         Some(t) => t.as_str(),
         None => {
             warn!("[WeCom] callback received but no token configured");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "No token configured".to_string());
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "No token configured".to_string(),
+            );
         }
     };
-    
+
     // URL verification: echostr present
     if !echostr.is_empty() {
         let mut params = vec![token, &timestamp, &nonce, &echostr];
@@ -325,19 +344,19 @@ async fn wecom_callback_handler(
             return (StatusCode::OK, echostr);
         }
     }
-    
+
     // Message callback
     if encrypt.is_empty() {
         return (StatusCode::BAD_REQUEST, "empty payload".to_string());
     }
-    
+
     let mut params = vec![token, &timestamp, &nonce, &encrypt];
     params.sort();
     let computed = format!("{:x}", Sha1::digest(params.join("").as_bytes()));
     if computed != msg_signature {
         return (StatusCode::UNAUTHORIZED, "signature mismatch".to_string());
     }
-    
+
     let msg_content = if let Some(ref aes_key) = shared.encoding_aes_key {
         match decrypt_wecom_message(aes_key, &encrypt, &shared.corp_id) {
             Ok(content) => content,
@@ -346,11 +365,11 @@ async fn wecom_callback_handler(
     } else {
         encrypt
     };
-    
+
     info!("[WeCom] received message: {}", msg_content);
-    
+
     let text = extract_wecom_text(&msg_content).unwrap_or_else(|| msg_content.clone());
-    
+
     // Build message and call handler
     if let Some(ref handler) = shared.message_handler {
         let chain = WeComShared::parse_message_content(&text);
@@ -380,7 +399,11 @@ async fn wecom_callback_handler(
     (StatusCode::OK, "success".to_string())
 }
 
-fn decrypt_wecom_message(encoding_aes_key: &str, encrypt: &str, corp_id: &str) -> std::result::Result<String, String> {
+fn decrypt_wecom_message(
+    encoding_aes_key: &str,
+    encrypt: &str,
+    corp_id: &str,
+) -> std::result::Result<String, String> {
     let key = general_purpose::STANDARD
         .decode(encoding_aes_key)
         .map_err(|e| format!("base64 decode aes key failed: {}", e))?;
@@ -400,16 +423,22 @@ fn decrypt_wecom_message(encoding_aes_key: &str, encrypt: &str, corp_id: &str) -
     if decrypted.len() < 20 {
         return Err("decrypted data too short".to_string());
     }
-    let msg_len = u32::from_be_bytes([
-        decrypted[16], decrypted[17], decrypted[18], decrypted[19]
-    ]) as usize;
+    let msg_len =
+        u32::from_be_bytes([decrypted[16], decrypted[17], decrypted[18], decrypted[19]]) as usize;
     if 20 + msg_len > decrypted.len() {
-        return Err(format!("msg_len {} exceeds data length {}", msg_len, decrypted.len()));
+        return Err(format!(
+            "msg_len {} exceeds data length {}",
+            msg_len,
+            decrypted.len()
+        ));
     }
     let msg = String::from_utf8_lossy(&decrypted[20..20 + msg_len]).to_string();
     let trailing_corp_id = String::from_utf8_lossy(&decrypted[20 + msg_len..]).to_string();
     if !trailing_corp_id.is_empty() && trailing_corp_id != corp_id {
-        return Err(format!("corp_id mismatch: expected {}, got {}", corp_id, trailing_corp_id));
+        return Err(format!(
+            "corp_id mismatch: expected {}, got {}",
+            corp_id, trailing_corp_id
+        ));
     }
     Ok(msg)
 }

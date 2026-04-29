@@ -1,7 +1,7 @@
-use async_trait::async_trait;
 use crate::errors::Result;
 use crate::message::MessageChain;
 use crate::platform::MessageSource;
+use async_trait::async_trait;
 
 /// Trait for sending messages from plugins
 #[async_trait]

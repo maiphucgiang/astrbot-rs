@@ -5,10 +5,10 @@
 //! - Sessions/conversations
 //! - Users
 
-use sqlx::{sqlite::{SqlitePool, SqlitePoolOptions}};
 use crate::errors::{AstrBotError, Result};
 use crate::provider::ChatMessage;
 use chrono::{DateTime, Utc};
+use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 
 pub mod migrate;
 
@@ -20,7 +20,9 @@ pub struct Database {
 impl Database {
     /// Create a new database manager with the given SQLite URL
     pub async fn new(database_url: &str) -> Result<Self> {
-        let pool = if database_url.starts_with("sqlite:") && !database_url.starts_with("sqlite::memory:") {
+        let pool = if database_url.starts_with("sqlite:")
+            && !database_url.starts_with("sqlite::memory:")
+        {
             let path = database_url.trim_start_matches("sqlite:");
             let options = sqlx::sqlite::SqliteConnectOptions::new()
                 .filename(path)
@@ -29,13 +31,17 @@ impl Database {
                 .max_connections(5)
                 .connect_with(options)
                 .await
-                .map_err(|e| AstrBotError::Internal(format!("Failed to connect to database: {}", e)))?
+                .map_err(|e| {
+                    AstrBotError::Internal(format!("Failed to connect to database: {}", e))
+                })?
         } else {
             SqlitePoolOptions::new()
                 .max_connections(5)
                 .connect(database_url)
                 .await
-                .map_err(|e| AstrBotError::Internal(format!("Failed to connect to database: {}", e)))?
+                .map_err(|e| {
+                    AstrBotError::Internal(format!("Failed to connect to database: {}", e))
+                })?
         };
 
         let db = Self { pool };
@@ -98,7 +104,7 @@ impl Database {
 
             CREATE INDEX IF NOT EXISTS idx_messages_session ON message_history(session_id);
             CREATE INDEX IF NOT EXISTS idx_messages_created ON message_history(created_at);
-            "#
+            "#,
         )
         .execute(&self.pool)
         .await
@@ -203,7 +209,7 @@ impl Database {
     /// Get a user by ID
     pub async fn get_user(&self, id: &str) -> Result<Option<User>> {
         let row = sqlx::query_as::<_, User>(
-            "SELECT id, platform_user_id, platform, nickname, created_at FROM users WHERE id = ?"
+            "SELECT id, platform_user_id, platform, nickname, created_at FROM users WHERE id = ?",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -287,7 +293,9 @@ impl Database {
             .bind(session_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| AstrBotError::Internal(format!("Failed to delete messages by session: {}", e)))?;
+            .map_err(|e| {
+                AstrBotError::Internal(format!("Failed to delete messages by session: {}", e))
+            })?;
 
         Ok(result.rows_affected())
     }
@@ -306,11 +314,12 @@ impl Database {
 
     /// Count messages in a session
     pub async fn count_messages(&self, session_id: &str) -> Result<i64> {
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM message_history WHERE session_id = ?")
-            .bind(session_id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| AstrBotError::Internal(format!("Failed to count messages: {}", e)))?;
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM message_history WHERE session_id = ?")
+                .bind(session_id)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| AstrBotError::Internal(format!("Failed to count messages: {}", e)))?;
 
         Ok(count)
     }
@@ -352,9 +361,7 @@ impl Database {
     }
 
     /// Load all personas from database
-    pub async fn load_personas(
-        &self,
-    ) -> Result<Vec<PersonaRecord>> {
+    pub async fn load_personas(&self) -> Result<Vec<PersonaRecord>> {
         let rows = sqlx::query_as::<_, PersonaRecord>(
             "SELECT id, name, system_prompt, variables, is_default, description, created_at FROM personas ORDER BY created_at DESC"
         )
@@ -394,12 +401,13 @@ impl Database {
 
     /// Load active persona ID
     pub async fn load_active_persona(&self) -> Result<Option<String>> {
-        let row: Option<(String,)> = sqlx::query_as(
-            "SELECT persona_id FROM active_persona WHERE key = 'global'"
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| AstrBotError::Internal(format!("Failed to load active persona: {}", e)))?;
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT persona_id FROM active_persona WHERE key = 'global'")
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| {
+                    AstrBotError::Internal(format!("Failed to load active persona: {}", e))
+                })?;
 
         Ok(row.map(|r| r.0))
     }
@@ -425,7 +433,7 @@ impl Database {
                      FROM message_history 
                      WHERE session_id = ? AND id < ? 
                      ORDER BY id DESC 
-                     LIMIT ?"
+                     LIMIT ?",
                 )
                 .bind(session_id)
                 .bind(cursor_id)
@@ -439,14 +447,15 @@ impl Database {
                      FROM message_history 
                      WHERE session_id = ? 
                      ORDER BY id DESC 
-                     LIMIT ?"
+                     LIMIT ?",
                 )
                 .bind(session_id)
                 .bind(fetch_limit)
                 .fetch_all(&self.pool)
                 .await
             }
-        }.map_err(|e| AstrBotError::Internal(format!("Failed to get paginated messages: {}", e)))?;
+        }
+        .map_err(|e| AstrBotError::Internal(format!("Failed to get paginated messages: {}", e)))?;
 
         let has_more = messages.len() > limit as usize;
         let mut result = messages;
@@ -517,10 +526,11 @@ mod tests {
     async fn test_database_init() {
         let db = Database::new_in_memory().await.unwrap();
         // If init succeeds, tables exist
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
-            .fetch_one(&db.pool)
-            .await
-            .unwrap();
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
         assert!(count >= 3); // sessions, users, message_history
     }
 
@@ -528,7 +538,9 @@ mod tests {
     async fn test_session_crud() {
         let db = Database::new_in_memory().await.unwrap();
 
-        db.create_session("sess1", "qq", "123456", Some("Test Chat")).await.unwrap();
+        db.create_session("sess1", "qq", "123456", Some("Test Chat"))
+            .await
+            .unwrap();
 
         let session = db.get_session("sess1").await.unwrap().unwrap();
         assert_eq!(session.platform, "qq");
@@ -545,12 +557,16 @@ mod tests {
     async fn test_user_upsert() {
         let db = Database::new_in_memory().await.unwrap();
 
-        db.upsert_user("u1", "qq_123", "qq", Some("Alice")).await.unwrap();
+        db.upsert_user("u1", "qq_123", "qq", Some("Alice"))
+            .await
+            .unwrap();
         let user = db.get_user("u1").await.unwrap().unwrap();
         assert_eq!(user.nickname, Some("Alice".to_string()));
 
         // Update nickname
-        db.upsert_user("u1", "qq_123", "qq", Some("Alice2")).await.unwrap();
+        db.upsert_user("u1", "qq_123", "qq", Some("Alice2"))
+            .await
+            .unwrap();
         let user = db.get_user("u1").await.unwrap().unwrap();
         assert_eq!(user.nickname, Some("Alice2".to_string()));
     }
@@ -558,12 +574,19 @@ mod tests {
     #[tokio::test]
     async fn test_message_history() {
         let db = Database::new_in_memory().await.unwrap();
-        db.create_session("sess1", "qq", "123456", None).await.unwrap();
+        db.create_session("sess1", "qq", "123456", None)
+            .await
+            .unwrap();
 
-        let msg_id = db.save_message("sess1", Some("u1"), "user", "Hello", Some("gpt-4")).await.unwrap();
+        let msg_id = db
+            .save_message("sess1", Some("u1"), "user", "Hello", Some("gpt-4"))
+            .await
+            .unwrap();
         assert!(msg_id > 0);
 
-        db.save_message("sess1", None, "assistant", "Hi there", Some("gpt-4")).await.unwrap();
+        db.save_message("sess1", None, "assistant", "Hi there", Some("gpt-4"))
+            .await
+            .unwrap();
 
         let messages = db.get_session_messages("sess1", 10).await.unwrap();
         assert_eq!(messages.len(), 2);
@@ -577,11 +600,19 @@ mod tests {
     #[tokio::test]
     async fn test_messages_as_chat() {
         let db = Database::new_in_memory().await.unwrap();
-        db.create_session("sess1", "qq", "123456", None).await.unwrap();
+        db.create_session("sess1", "qq", "123456", None)
+            .await
+            .unwrap();
 
-        db.save_message("sess1", Some("u1"), "user", "Hello", None).await.unwrap();
-        db.save_message("sess1", None, "assistant", "Hi", None).await.unwrap();
-        db.save_message("sess1", Some("u1"), "user", "How are you?", None).await.unwrap();
+        db.save_message("sess1", Some("u1"), "user", "Hello", None)
+            .await
+            .unwrap();
+        db.save_message("sess1", None, "assistant", "Hi", None)
+            .await
+            .unwrap();
+        db.save_message("sess1", Some("u1"), "user", "How are you?", None)
+            .await
+            .unwrap();
 
         let chat_messages = db.get_messages_as_chat("sess1", 10).await.unwrap();
         assert_eq!(chat_messages.len(), 3);
@@ -593,10 +624,16 @@ mod tests {
     #[tokio::test]
     async fn test_delete_old_messages() {
         let db = Database::new_in_memory().await.unwrap();
-        db.create_session("sess1", "qq", "123456", None).await.unwrap();
+        db.create_session("sess1", "qq", "123456", None)
+            .await
+            .unwrap();
 
-        db.save_message("sess1", None, "user", "Old", None).await.unwrap();
-        db.save_message("sess1", None, "user", "New", None).await.unwrap();
+        db.save_message("sess1", None, "user", "Old", None)
+            .await
+            .unwrap();
+        db.save_message("sess1", None, "user", "New", None)
+            .await
+            .unwrap();
 
         let deleted = db.delete_old_messages(Utc::now()).await.unwrap();
         assert_eq!(deleted, 2);
@@ -609,10 +646,16 @@ mod tests {
     async fn test_multiple_sessions_isolated() {
         let db = Database::new_in_memory().await.unwrap();
         db.create_session("sess1", "qq", "123", None).await.unwrap();
-        db.create_session("sess2", "telegram", "456", None).await.unwrap();
+        db.create_session("sess2", "telegram", "456", None)
+            .await
+            .unwrap();
 
-        db.save_message("sess1", None, "user", "msg1", None).await.unwrap();
-        db.save_message("sess2", None, "user", "msg2", None).await.unwrap();
+        db.save_message("sess1", None, "user", "msg1", None)
+            .await
+            .unwrap();
+        db.save_message("sess2", None, "user", "msg2", None)
+            .await
+            .unwrap();
 
         let m1 = db.get_session_messages("sess1", 10).await.unwrap();
         let m2 = db.get_session_messages("sess2", 10).await.unwrap();

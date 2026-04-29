@@ -9,9 +9,9 @@ pub struct AuditEntry {
     pub id: String,
     pub timestamp: DateTime<Utc>,
     pub level: AuditLevel,
-    pub actor: String,        // who did it (user_id, bot_id, system)
-    pub action: String,       // what happened
-    pub resource: String,     // what was affected
+    pub actor: String,    // who did it (user_id, bot_id, system)
+    pub action: String,   // what happened
+    pub resource: String, // what was affected
     pub details: Option<String>,
     pub ip: Option<String>,
     pub success: bool,
@@ -56,7 +56,15 @@ impl AuditLogger {
 
     /// Log a new audit entry
     pub fn log(
-        &self, level: AuditLevel, actor: &str, action: &str, resource: &str, success: bool, details: Option<&str>, ip: Option<&str>) {
+        &self,
+        level: AuditLevel,
+        actor: &str,
+        action: &str,
+        resource: &str,
+        success: bool,
+        details: Option<&str>,
+        ip: Option<&str>,
+    ) {
         let entry = AuditEntry {
             id: uuid::Uuid::new_v4().to_string(),
             timestamp: Utc::now(),
@@ -82,19 +90,44 @@ impl AuditLogger {
     }
 
     pub fn warn(&self, actor: &str, action: &str, resource: &str, details: &str) {
-        self.log(AuditLevel::Warning, actor, action, resource, true, Some(details), None);
+        self.log(
+            AuditLevel::Warning,
+            actor,
+            action,
+            resource,
+            true,
+            Some(details),
+            None,
+        );
     }
 
     pub fn error(&self, actor: &str, action: &str, resource: &str, details: &str) {
-        self.log(AuditLevel::Error, actor, action, resource, false, Some(details), None);
+        self.log(
+            AuditLevel::Error,
+            actor,
+            action,
+            resource,
+            false,
+            Some(details),
+            None,
+        );
     }
 
     pub fn critical(&self, actor: &str, action: &str, resource: &str, details: &str, ip: &str) {
-        self.log(AuditLevel::Critical, actor, action, resource, false, Some(details), Some(ip));
+        self.log(
+            AuditLevel::Critical,
+            actor,
+            action,
+            resource,
+            false,
+            Some(details),
+            Some(ip),
+        );
     }
 
     /// Query entries with filters
-    pub fn query(&self,
+    pub fn query(
+        &self,
         level: Option<AuditLevel>,
         actor: Option<&str>,
         action: Option<&str>,
@@ -109,19 +142,39 @@ impl AuditLogger {
             .iter()
             .rev() // newest first
             .filter(|e| {
-                if let Some(ref l) = level { e.level == *l } else { true }
+                if let Some(ref l) = level {
+                    e.level == *l
+                } else {
+                    true
+                }
             })
             .filter(|e| {
-                if let Some(a) = actor { e.actor == a } else { true }
+                if let Some(a) = actor {
+                    e.actor == a
+                } else {
+                    true
+                }
             })
             .filter(|e| {
-                if let Some(a) = action { e.action == a } else { true }
+                if let Some(a) = action {
+                    e.action == a
+                } else {
+                    true
+                }
             })
             .filter(|e| {
-                if let Some(s) = since { e.timestamp >= s } else { true }
+                if let Some(s) = since {
+                    e.timestamp >= s
+                } else {
+                    true
+                }
             })
             .filter(|e| {
-                if let Some(u) = until { e.timestamp <= u } else { true }
+                if let Some(u) = until {
+                    e.timestamp <= u
+                } else {
+                    true
+                }
             })
             .take(limit)
             .cloned()

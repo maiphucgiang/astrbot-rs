@@ -33,18 +33,24 @@ impl MessageQuoter {
     /// Extract quote info from an AstrBotMessage's Reply component
     pub fn extract_from_chain(chain: &MessageChain) -> Option<QuoteInfo> {
         chain.0.iter().find_map(|c| match c {
-            MessageComponent::Reply { message_id, chain: quoted_chain } => {
-                let summary = quoted_chain.as_ref()
-                    .map(|qc| qc.iter()
-                        .filter_map(|c| match c {
-                            MessageComponent::Plain { text } => Some(text.as_str()),
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>()
-                        .concat()
-                        .chars()
-                        .take(100)
-                        .collect::<String>())
+            MessageComponent::Reply {
+                message_id,
+                chain: quoted_chain,
+            } => {
+                let summary = quoted_chain
+                    .as_ref()
+                    .map(|qc| {
+                        qc.iter()
+                            .filter_map(|c| match c {
+                                MessageComponent::Plain { text } => Some(text.as_str()),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                            .concat()
+                            .chars()
+                            .take(100)
+                            .collect::<String>()
+                    })
                     .unwrap_or_default();
 
                 Some(QuoteInfo {
@@ -63,7 +69,9 @@ impl MessageQuoter {
     /// Build a human-readable quote prefix for replies
     /// Example: "> [Alice] hello world...\n"
     pub fn format_quote_prefix(quote: &QuoteInfo) -> String {
-        let sender = quote.sender_name.as_ref()
+        let sender = quote
+            .sender_name
+            .as_ref()
             .or_else(|| {
                 if quote.sender_id.is_empty() {
                     None
@@ -103,12 +111,18 @@ impl MessageQuoter {
                     let msg_id = r.get("message_id")?.as_str()?.to_string();
                     let sender_id = r.get("sender")?.get("user_id")?.as_str()?.to_string();
                     let sender_name = r.get("sender")?.get("nickname")?.as_str().map(String::from);
-                    let content = r.get("message")?.as_array().and_then(|arr| {
-                        Some(arr.iter()
-                            .filter_map(|c| c.get("data")?.get("text")?.as_str())
-                            .collect::<Vec<_>>()
-                            .concat())
-                    }).unwrap_or_default();
+                    let content = r
+                        .get("message")?
+                        .as_array()
+                        .and_then(|arr| {
+                            Some(
+                                arr.iter()
+                                    .filter_map(|c| c.get("data")?.get("text")?.as_str())
+                                    .collect::<Vec<_>>()
+                                    .concat(),
+                            )
+                        })
+                        .unwrap_or_default();
 
                     Some(QuoteInfo {
                         message_id: msg_id,
@@ -126,17 +140,19 @@ impl MessageQuoter {
                     let msg_id = r.get("message_id")?.as_i64()?.to_string();
                     let sender = r.get("from")?;
                     let sender_id = sender.get("id")?.as_i64()?.to_string();
-                    let sender_name = sender.get("username")?
-                        .as_str()
-                        .map(String::from)
-                        .or_else(|| {
-                            let first = sender.get("first_name")?.as_str()?;
-                            let last = sender.get("last_name").and_then(|l| l.as_str());
-                            Some(match last {
-                                Some(l) => format!("{} {}", first, l),
-                                None => first.to_string(),
-                            })
-                        });
+                    let sender_name =
+                        sender
+                            .get("username")?
+                            .as_str()
+                            .map(String::from)
+                            .or_else(|| {
+                                let first = sender.get("first_name")?.as_str()?;
+                                let last = sender.get("last_name").and_then(|l| l.as_str());
+                                Some(match last {
+                                    Some(l) => format!("{} {}", first, l),
+                                    None => first.to_string(),
+                                })
+                            });
                     let text = r.get("text")?.as_str()?.to_string();
 
                     Some(QuoteInfo {
@@ -190,12 +206,20 @@ impl MessageQuoter {
                 raw.get("event").and_then(|e| {
                     let msg = e.get("message")?;
                     let parent_id = msg.get("parent_id")?.as_str()?;
-                    let sender_id = msg.get("sender")?.get("sender_id")?.get("open_id")?.as_str()?;
-                    let content = msg.get("content")?.as_str().and_then(|s| {
-                        serde_json::from_str::<serde_json::Value>(s)
-                            .ok()
-                            .and_then(|v| v.get("text")?.as_str().map(String::from))
-                    }).unwrap_or_default();
+                    let sender_id = msg
+                        .get("sender")?
+                        .get("sender_id")?
+                        .get("open_id")?
+                        .as_str()?;
+                    let content = msg
+                        .get("content")?
+                        .as_str()
+                        .and_then(|s| {
+                            serde_json::from_str::<serde_json::Value>(s)
+                                .ok()
+                                .and_then(|v| v.get("text")?.as_str().map(String::from))
+                        })
+                        .unwrap_or_default();
 
                     Some(QuoteInfo {
                         message_id: parent_id.to_string(),
@@ -212,15 +236,15 @@ impl MessageQuoter {
     }
 
     /// Parse quote from a message and enrich the chain with it
-    pub fn enrich_message_with_quote(
-        message: &mut AstrBotMessage,
-    ) {
+    pub fn enrich_message_with_quote(message: &mut AstrBotMessage) {
         if let Some(raw) = &message.raw_payload {
             if let Some(quote) = Self::extract_from_raw(message.platform, raw) {
                 // Insert Reply component at the beginning of the chain
                 let reply = MessageComponent::Reply {
                     message_id: quote.message_id.clone(),
-                    chain: Some(vec![MessageComponent::Plain { text: quote.summary.clone() }]),
+                    chain: Some(vec![MessageComponent::Plain {
+                        text: quote.summary.clone(),
+                    }]),
                 };
                 message.chain.0.insert(0, reply);
             }
@@ -234,9 +258,7 @@ mod tests {
 
     #[test]
     fn test_extract_from_chain() {
-        let chain = MessageChain::new()
-            .reply("msg123", None)
-            .text("hello");
+        let chain = MessageChain::new().reply("msg123", None).text("hello");
 
         let quote = MessageQuoter::extract_from_chain(&chain).unwrap();
         assert_eq!(quote.message_id, "msg123");
@@ -245,9 +267,12 @@ mod tests {
     #[test]
     fn test_extract_from_chain_with_quoted_content() {
         let chain = MessageChain::new()
-            .reply("msg456", Some(vec![
-                MessageComponent::Plain { text: "quoted text".to_string() },
-            ]))
+            .reply(
+                "msg456",
+                Some(vec![MessageComponent::Plain {
+                    text: "quoted text".to_string(),
+                }]),
+            )
             .text("response");
 
         let quote = MessageQuoter::extract_from_chain(&chain).unwrap();

@@ -1,7 +1,7 @@
-use async_trait::async_trait;
 use astrbot_core::errors::Result;
 use astrbot_core::message::{AstrBotMessage, MessageChain, MessageHandler};
 use astrbot_core::platform::{MessageSource, PlatformMetadata};
+use async_trait::async_trait;
 use std::sync::Arc;
 
 #[async_trait]

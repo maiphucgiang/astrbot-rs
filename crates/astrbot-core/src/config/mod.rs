@@ -1,13 +1,13 @@
+use crate::errors::{AstrBotError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
-use crate::errors::{AstrBotError, Result};
 
-pub mod hot_reload;
 pub mod env_override;
+pub mod hot_reload;
 
-pub use hot_reload::*;
 pub use env_override::*;
+pub use hot_reload::*;
 
 /// Core AstrBot configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -85,11 +85,9 @@ impl AstrBotConfig {
         } else if path.extension().and_then(|s| s.to_str()) == Some("yaml")
             || path.extension().and_then(|s| s.to_str()) == Some("yml")
         {
-            serde_yaml::to_string(self)
-                .map_err(|e| AstrBotError::Serialization(e.to_string()))?
+            serde_yaml::to_string(self).map_err(|e| AstrBotError::Serialization(e.to_string()))?
         } else {
-            toml::to_string_pretty(self)
-                .map_err(|e| AstrBotError::Serialization(e.to_string()))?
+            toml::to_string_pretty(self).map_err(|e| AstrBotError::Serialization(e.to_string()))?
         };
 
         tokio::fs::write(path, content)

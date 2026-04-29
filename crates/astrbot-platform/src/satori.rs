@@ -1,8 +1,11 @@
-use async_trait::async_trait;
-use astrbot_core::errors::{AstrBotError, Result};
-use astrbot_core::message::{AstrBotMessage, MessageChain, MessageComponent, MessageMember, MessageType, HandlerRef, MessageHandler};
-use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
 use crate::adapter::PlatformAdapter;
+use astrbot_core::errors::{AstrBotError, Result};
+use astrbot_core::message::{
+    AstrBotMessage, HandlerRef, MessageChain, MessageComponent, MessageHandler, MessageMember,
+    MessageType,
+};
+use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
+use async_trait::async_trait;
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -139,7 +142,12 @@ impl PlatformAdapter for SatoriAdapter {
     async fn start(&mut self) -> Result<()> {
         self.running.store(true, Ordering::SeqCst);
 
-        let ws_url = format!("{}/v1/events", self.endpoint.replace("http://", "ws://").replace("https://", "wss://"));
+        let ws_url = format!(
+            "{}/v1/events",
+            self.endpoint
+                .replace("http://", "ws://")
+                .replace("https://", "wss://")
+        );
         let token = self.token.clone();
         let running = Arc::clone(&self.running);
         let handler = self.message_handler.clone();
@@ -157,29 +165,47 @@ impl PlatformAdapter for SatoriAdapter {
                         // Send login payload
                         let login = SatoriLoginPayload {
                             op: 1,
-                            body: SatoriLoginBody { token: token.clone() },
+                            body: SatoriLoginBody {
+                                token: token.clone(),
+                            },
                         };
                         let login_json = serde_json::to_string(&login).unwrap_or_default();
-                        let _ = ws_stream.send(tokio_tungstenite::tungstenite::Message::Text(login_json.into())).await;
+                        let _ = ws_stream
+                            .send(tokio_tungstenite::tungstenite::Message::Text(
+                                login_json.into(),
+                            ))
+                            .await;
 
                         while running.load(Ordering::SeqCst) {
-                            match tokio::time::timeout(
-                                Duration::from_secs(60),
-                                ws_stream.next()
-                            ).await {
+                            match tokio::time::timeout(Duration::from_secs(60), ws_stream.next())
+                                .await
+                            {
                                 Ok(Some(Ok(msg))) => {
-                                    if let tokio_tungstenite::tungstenite::Message::Text(text) = msg {
-                                        if let Ok(event) = serde_json::from_str::<SatoriEvent>(&text) {
+                                    if let tokio_tungstenite::tungstenite::Message::Text(text) = msg
+                                    {
+                                        if let Ok(event) =
+                                            serde_json::from_str::<SatoriEvent>(&text)
+                                        {
                                             if event.op == 0 && event.body.is_some() {
                                                 let body = event.body.unwrap();
                                                 if body.event_type == "message-created" {
-                                                    if let (Some(channel), Some(user), Some(message)) = 
-                                                        (body.channel.as_ref(), body.user.as_ref(), body.message.as_ref()) {
+                                                    if let (
+                                                        Some(channel),
+                                                        Some(user),
+                                                        Some(message),
+                                                    ) = (
+                                                        body.channel.as_ref(),
+                                                        body.user.as_ref(),
+                                                        body.message.as_ref(),
+                                                    ) {
                                                         let platform = PlatformType::Satori;
                                                         let source = MessageSource {
                                                             platform,
                                                             session_id: channel.id.clone(),
-                                                            message_id: message.id.clone().unwrap_or_default(),
+                                                            message_id: message
+                                                                .id
+                                                                .clone()
+                                                                .unwrap_or_default(),
                                                             user_id: user.id.clone(),
                                                         };
                                                         let member = MessageMember {
@@ -194,14 +220,25 @@ impl PlatformAdapter for SatoriAdapter {
                                                             _ => MessageType::Group,
                                                         };
                                                         let astr_message = AstrBotMessage {
-                                                            message_id: message.id.clone().unwrap_or_default(),
+                                                            message_id: message
+                                                                .id
+                                                                .clone()
+                                                                .unwrap_or_default(),
                                                             timestamp: Utc::now(),
                                                             platform,
                                                             session_id: channel.id.clone(),
                                                             sender: member,
                                                             message_type: msg_type,
-                                                            chain: MessageChain::new().text(&message.content.clone().unwrap_or_default()),
-                                                            raw_payload: Some(serde_json::to_value(&body).unwrap_or_default()),
+                                                            chain: MessageChain::new().text(
+                                                                &message
+                                                                    .content
+                                                                    .clone()
+                                                                    .unwrap_or_default(),
+                                                            ),
+                                                            raw_payload: Some(
+                                                                serde_json::to_value(&body)
+                                                                    .unwrap_or_default(),
+                                                            ),
                                                         };
                                                         if let Some(ref h) = handler {
                                                             h.on_message(astr_message).await;

@@ -1,7 +1,7 @@
 mod runtime;
 
 use clap::{Parser, Subcommand};
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 #[derive(Parser)]
 #[command(name = "astrbot")]
@@ -75,9 +75,11 @@ enum PluginAction {
 async fn main() -> anyhow::Result<()> {
     // Initialize tracing
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env()
-            .add_directive("astrbot=info".parse()?)
-            .add_directive("warn".parse()?))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive("astrbot=info".parse()?)
+                .add_directive("warn".parse()?),
+        )
         .init();
 
     let cli = Cli::parse();
@@ -103,38 +105,47 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Status { detailed } => {
             let config_exists = std::path::Path::new("config.json").exists();
-            let status = if config_exists { "ready" } else { "not configured" };
+            let status = if config_exists {
+                "ready"
+            } else {
+                "not configured"
+            };
             println!("AstrBot Status:");
             println!("  Version: {}", env!("CARGO_PKG_VERSION"));
             println!("  Status: {}", status);
             if detailed {
-                println!("  Config: {}", if config_exists { "config.json found" } else { "no config.json" });
+                println!(
+                    "  Config: {}",
+                    if config_exists {
+                        "config.json found"
+                    } else {
+                        "no config.json"
+                    }
+                );
                 println!("  Dashboard: http://0.0.0.0:6185");
             }
             if !config_exists {
                 std::process::exit(1);
             }
         }
-        Commands::Plugin { action } => {
-            match action {
-                PluginAction::List => {
-                    println!("Installed plugins:");
-                    println!("  (none)");
-                }
-                PluginAction::Install { identifier } => {
-                    info!("Installing plugin: {}", identifier);
-                }
-                PluginAction::Uninstall { id } => {
-                    info!("Uninstalling plugin: {}", id);
-                }
-                PluginAction::Enable { id } => {
-                    info!("Enabling plugin: {}", id);
-                }
-                PluginAction::Disable { id } => {
-                    info!("Disabling plugin: {}", id);
-                }
+        Commands::Plugin { action } => match action {
+            PluginAction::List => {
+                println!("Installed plugins:");
+                println!("  (none)");
             }
-        }
+            PluginAction::Install { identifier } => {
+                info!("Installing plugin: {}", identifier);
+            }
+            PluginAction::Uninstall { id } => {
+                info!("Uninstalling plugin: {}", id);
+            }
+            PluginAction::Enable { id } => {
+                info!("Enabling plugin: {}", id);
+            }
+            PluginAction::Disable { id } => {
+                info!("Disabling plugin: {}", id);
+            }
+        },
         Commands::Dashboard { port } => {
             info!("Starting dashboard on port {}", port);
             astrbot_dashboard::server::start_server().await;
@@ -142,7 +153,10 @@ async fn main() -> anyhow::Result<()> {
         Commands::Test { provider } => {
             info!("Testing provider: {}", provider);
             match test_provider(&provider).await {
-                Ok(latency) => println!("Provider {} is available (latency: {}ms)", provider, latency),
+                Ok(latency) => println!(
+                    "Provider {} is available (latency: {}ms)",
+                    provider, latency
+                ),
                 Err(e) => {
                     error!("Provider test failed: {}", e);
                     std::process::exit(1);
@@ -163,7 +177,10 @@ async fn run_server(config_path: String) -> anyhow::Result<()> {
     let cfg = match astrbot_core::config::AstrBotConfig::from_file(&config_path).await {
         Ok(c) => c,
         Err(e) => {
-            warn!("Failed to load config from {}: {}. Using defaults.", config_path, e);
+            warn!(
+                "Failed to load config from {}: {}. Using defaults.",
+                config_path, e
+            );
             astrbot_core::config::AstrBotConfig::default()
         }
     };
@@ -182,7 +199,10 @@ async fn run_server(config_path: String) -> anyhow::Result<()> {
             );
         }
     }
-    info!("Registered {} providers", runtime.provider_manager.list().len());
+    info!(
+        "Registered {} providers",
+        runtime.provider_manager.list().len()
+    );
 
     // 3. Register platform adapters from config
     for platform_cfg in &cfg.platforms {
@@ -192,16 +212,41 @@ async fn run_server(config_path: String) -> anyhow::Result<()> {
         let pt = platform_cfg.platform_type.as_str();
         let _ = match pt {
             "qq" => {
-                let ws_host = platform_cfg.config.get("ws_host").and_then(|v| v.as_str()).unwrap_or("127.0.0.1");
-                let ws_port = platform_cfg.config.get("ws_port").and_then(|v| v.as_u64()).unwrap_or(3001) as u16;
-                let http_url = platform_cfg.config.get("http_url").and_then(|v| v.as_str()).unwrap_or("http://127.0.0.1:3000");
-                let access_token = platform_cfg.config.get("access_token").and_then(|v| v.as_str());
-                info!("[Runtime] QQ adapter configured for {}:{}", ws_host, ws_port);
+                let ws_host = platform_cfg
+                    .config
+                    .get("ws_host")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("127.0.0.1");
+                let ws_port = platform_cfg
+                    .config
+                    .get("ws_port")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(3001) as u16;
+                let http_url = platform_cfg
+                    .config
+                    .get("http_url")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("http://127.0.0.1:3000");
+                let access_token = platform_cfg
+                    .config
+                    .get("access_token")
+                    .and_then(|v| v.as_str());
+                info!(
+                    "[Runtime] QQ adapter configured for {}:{}",
+                    ws_host, ws_port
+                );
                 Ok::<(), anyhow::Error>(())
             }
             "telegram" => {
-                let bot_token = platform_cfg.config.get("bot_token").and_then(|v| v.as_str()).unwrap_or("");
-                info!("[Runtime] Telegram adapter configured (token: {}...)", &bot_token[..bot_token.len().min(8)]);
+                let bot_token = platform_cfg
+                    .config
+                    .get("bot_token")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                info!(
+                    "[Runtime] Telegram adapter configured (token: {}...)",
+                    &bot_token[..bot_token.len().min(8)]
+                );
                 Ok::<(), anyhow::Error>(())
             }
             _ => {

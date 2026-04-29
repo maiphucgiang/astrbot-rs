@@ -1,14 +1,15 @@
 pub mod client;
 pub mod openai;
 pub mod openai_compatible;
-pub mod sources;
 pub mod registry;
+pub mod sources;
 pub mod tts;
 
 // New providers from Redmao Phase 2
 pub mod ai21;
 pub mod azure;
 pub mod baichuan;
+pub mod baidu;
 pub mod cohere;
 pub mod fireworks;
 pub mod groq;
@@ -16,14 +17,13 @@ pub mod openrouter;
 pub mod perplexity;
 pub mod together;
 pub mod zerooneai;
-pub mod baidu;
 
 pub use openai_compatible::*;
 pub use registry::*;
 pub use tts::*;
 
-use async_trait::async_trait;
 use astrbot_core::{AstrMessage, MessageContent};
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -50,7 +50,8 @@ pub trait ChatProvider: Send + Sync {
         &self,
         _messages: Vec<ChatMessage>,
         _options: ChatOptions,
-    ) -> Result<Box<dyn futures::Stream<Item = Result<String, ProviderError>> + Send>, ProviderError> {
+    ) -> Result<Box<dyn futures::Stream<Item = Result<String, ProviderError>> + Send>, ProviderError>
+    {
         Err(ProviderError::NotImplemented("streaming".to_string()))
     }
 
@@ -75,7 +76,9 @@ pub trait EmbeddingProvider: Send + Sync {
     /// 单个文本嵌入（便利方法）
     async fn embed_one(&self, text: String) -> Result<Vec<f32>, ProviderError> {
         let mut results = self.embed(vec![text]).await?;
-        results.pop().ok_or_else(|| ProviderError::Unavailable("empty embedding response".to_string()))
+        results
+            .pop()
+            .ok_or_else(|| ProviderError::Unavailable("empty embedding response".to_string()))
     }
 }
 

@@ -51,19 +51,17 @@ impl TextSplitter {
     }
 
     /// Split a document into chunks
-    pub fn split(&self,
-        doc: &Document,
-    ) -> Vec<TextChunk> {
+    pub fn split(&self, doc: &Document) -> Vec<TextChunk> {
         match &self.strategy {
-            SplitStrategy::FixedSize { chunk_size, overlap } => {
-                self.split_fixed(&doc.id, &doc.content, *chunk_size, *overlap)
-            }
-            SplitStrategy::Paragraph => {
-                self.split_paragraph(&doc.id, &doc.content)
-            }
-            SplitStrategy::Recursive { chunk_size, overlap } => {
-                self.split_recursive(&doc.id, &doc.content, *chunk_size, *overlap)
-            }
+            SplitStrategy::FixedSize {
+                chunk_size,
+                overlap,
+            } => self.split_fixed(&doc.id, &doc.content, *chunk_size, *overlap),
+            SplitStrategy::Paragraph => self.split_paragraph(&doc.id, &doc.content),
+            SplitStrategy::Recursive {
+                chunk_size,
+                overlap,
+            } => self.split_recursive(&doc.id, &doc.content, *chunk_size, *overlap),
         }
     }
 
@@ -100,21 +98,22 @@ impl TextSplitter {
         chunks
     }
 
-    fn split_paragraph(
-        &self,
-        doc_id: &str,
-        content: &str,
-    ) -> Vec<TextChunk> {
-        let paragraphs: Vec<&str> = content.split("\n\n").filter(|s| !s.trim().is_empty()).collect();
-        paragraphs.into_iter().enumerate().map(|(index, text)| {
-            TextChunk {
+    fn split_paragraph(&self, doc_id: &str, content: &str) -> Vec<TextChunk> {
+        let paragraphs: Vec<&str> = content
+            .split("\n\n")
+            .filter(|s| !s.trim().is_empty())
+            .collect();
+        paragraphs
+            .into_iter()
+            .enumerate()
+            .map(|(index, text)| TextChunk {
                 id: format!("{}-chunk-{}", doc_id, index),
                 doc_id: doc_id.to_string(),
                 text: text.trim().to_string(),
                 index,
                 metadata: None,
-            }
-        }).collect()
+            })
+            .collect()
     }
 
     fn split_recursive(
@@ -125,7 +124,10 @@ impl TextSplitter {
         overlap: usize,
     ) -> Vec<TextChunk> {
         // First try paragraphs
-        let paragraphs: Vec<&str> = content.split("\n\n").filter(|s| !s.trim().is_empty()).collect();
+        let paragraphs: Vec<&str> = content
+            .split("\n\n")
+            .filter(|s| !s.trim().is_empty())
+            .collect();
         let mut chunks = Vec::new();
         let mut current = String::new();
         let mut index = 0;
@@ -178,19 +180,15 @@ pub struct EmbeddingRecord {
 #[async_trait]
 pub trait EmbeddingStore: Send + Sync {
     /// Store a batch of records
-    async fn store(&mut self,
-        records: Vec<EmbeddingRecord>,
-    ) -> Result<()>;
+    async fn store(&mut self, records: Vec<EmbeddingRecord>) -> Result<()>;
     /// Search for top-k similar embeddings
     async fn search(
         &self,
         query_embedding: &[f32],
         top_k: usize,
-    ) -> Result<Vec<( EmbeddingRecord, f32 )>>;
+    ) -> Result<Vec<(EmbeddingRecord, f32)>>;
     /// Delete all records for a document
-    async fn delete_by_doc(&mut self,
-        doc_id: &str,
-    ) -> Result<()>;
+    async fn delete_by_doc(&mut self, doc_id: &str) -> Result<()>;
     /// Get total record count
     fn count(&self) -> usize;
 }
@@ -210,7 +208,9 @@ impl Default for MemoryEmbeddingStore {
 
 impl MemoryEmbeddingStore {
     pub fn new() -> Self {
-        Self { records: Vec::new() }
+        Self {
+            records: Vec::new(),
+        }
     }
 
     fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
@@ -227,9 +227,7 @@ impl MemoryEmbeddingStore {
 
 #[async_trait]
 impl EmbeddingStore for MemoryEmbeddingStore {
-    async fn store(&mut self,
-        records: Vec<EmbeddingRecord>,
-    ) -> Result<()> {
+    async fn store(&mut self, records: Vec<EmbeddingRecord>) -> Result<()> {
         self.records.extend(records);
         Ok(())
     }
@@ -239,8 +237,15 @@ impl EmbeddingStore for MemoryEmbeddingStore {
         query_embedding: &[f32],
         top_k: usize,
     ) -> Result<Vec<(EmbeddingRecord, f32)>> {
-        let mut scored: Vec<(EmbeddingRecord, f32)> = self.records.iter()
-            .map(|r| (r.clone(), Self::cosine_similarity(query_embedding, &r.embedding)))
+        let mut scored: Vec<(EmbeddingRecord, f32)> = self
+            .records
+            .iter()
+            .map(|r| {
+                (
+                    r.clone(),
+                    Self::cosine_similarity(query_embedding, &r.embedding),
+                )
+            })
             .collect();
 
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -248,9 +253,7 @@ impl EmbeddingStore for MemoryEmbeddingStore {
         Ok(scored)
     }
 
-    async fn delete_by_doc(&mut self,
-        doc_id: &str,
-    ) -> Result<()> {
+    async fn delete_by_doc(&mut self, doc_id: &str) -> Result<()> {
         self.records.retain(|r| r.doc_id != doc_id);
         Ok(())
     }
@@ -287,23 +290,23 @@ impl Retriever {
     }
 
     /// Index a document: split → embed → store
-    pub async fn index_document(
-        &self,
-        doc: &Document,
-        splitter: &TextSplitter,
-    ) -> Result<()> {
+    pub async fn index_document(&self, doc: &Document, splitter: &TextSplitter) -> Result<()> {
         let chunks = splitter.split(doc);
         if chunks.is_empty() {
             return Ok(());
         }
 
         let texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
-        let embeddings = self.provider.embedding(texts, Some(self.embedding_model.clone())).await?;
+        let embeddings = self
+            .provider
+            .embedding(texts, Some(self.embedding_model.clone()))
+            .await?;
 
         if embeddings.len() != chunks.len() {
             return Err(AstrBotError::Internal(format!(
                 "Embedding count mismatch: {} chunks vs {} embeddings",
-                chunks.len(), embeddings.len()
+                chunks.len(),
+                embeddings.len()
             )));
         }
 
@@ -313,12 +316,9 @@ impl Retriever {
                 "text": chunk.text,
                 "index": chunk.index,
             });
-            self.store.upsert(
-                &self.collection,
-                &chunk.id,
-                emb,
-                Some(metadata),
-            ).await?;
+            self.store
+                .upsert(&self.collection, &chunk.id, emb, Some(metadata))
+                .await?;
         }
 
         Ok(())
@@ -326,15 +326,19 @@ impl Retriever {
 
     /// Query: embed query → search store → return top-k results
     pub async fn query(&self, query: &str) -> Result<Vec<SearchResult>> {
-        let embeddings = self.provider.embedding(
-            vec![query.to_string()],
-            Some(self.embedding_model.clone()),
-        ).await?;
+        let embeddings = self
+            .provider
+            .embedding(vec![query.to_string()], Some(self.embedding_model.clone()))
+            .await?;
 
-        let query_emb = embeddings.into_iter().next()
+        let query_emb = embeddings
+            .into_iter()
+            .next()
             .ok_or_else(|| AstrBotError::Internal("Query embedding returned empty".to_string()))?;
 
-        self.store.search(&self.collection, query_emb, self.top_k).await
+        self.store
+            .search(&self.collection, query_emb, self.top_k)
+            .await
     }
 }
 
@@ -360,11 +364,13 @@ impl DocumentParser {
         let val: serde_json::Value = serde_json::from_str(json_str)
             .map_err(|e| AstrBotError::Serialization(format!("JSON parse error: {}", e)))?;
 
-        let title = val.get("title")
+        let title = val
+            .get("title")
             .and_then(|v| v.as_str())
             .unwrap_or("untitled")
             .to_string();
-        let content = val.get("content")
+        let content = val
+            .get("content")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();

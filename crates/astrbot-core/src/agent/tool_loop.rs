@@ -2,9 +2,9 @@
 //!
 //! Pattern: user input → LLM → tool_calls → execute tool → result回传 → 循环至完成或 max_iterations
 
-use crate::errors::Result;
-use crate::provider::{ChatMessage, ChatConfig};
 use super::{AgentContext, AgentResult, ToolCall, ToolResult};
+use crate::errors::Result;
+use crate::provider::{ChatConfig, ChatMessage};
 use serde_json::json;
 
 /// Maximum iterations before auto-truncation
@@ -14,10 +14,7 @@ const DEFAULT_MAX_ITERATIONS: usize = 5;
 #[async_trait::async_trait]
 pub trait ToolExecutor: Send + Sync {
     /// Execute a single tool call and return the result
-    async fn execute(&self,
-        call: &ToolCall,
-        ctx: &AgentContext,
-    ) -> Result<ToolResult>;
+    async fn execute(&self, call: &ToolCall, ctx: &AgentContext) -> Result<ToolResult>;
 
     /// List available tools for schema generation
     fn tool_schemas(&self) -> Vec<serde_json::Value>;
@@ -30,10 +27,7 @@ pub struct FnToolExecutor {
 }
 
 impl FnToolExecutor {
-    pub fn new<F>(
-        schemas: Vec<serde_json::Value>,
-        f: F,
-    ) -> Self
+    pub fn new<F>(schemas: Vec<serde_json::Value>, f: F) -> Self
     where
         F: Fn(&ToolCall, &AgentContext) -> Result<ToolResult> + Send + Sync + 'static,
     {
@@ -46,11 +40,7 @@ impl FnToolExecutor {
 
 #[async_trait::async_trait]
 impl ToolExecutor for FnToolExecutor {
-    async fn execute(
-        &self,
-        call: &ToolCall,
-        ctx: &AgentContext,
-    ) -> Result<ToolResult> {
+    async fn execute(&self, call: &ToolCall, ctx: &AgentContext) -> Result<ToolResult> {
         (self.f)(call, ctx)
     }
 
@@ -196,7 +186,11 @@ fn parse_tool_call(raw: &serde_json::Value) -> Result<ToolCall> {
         .to_string();
     let arguments = function.get("arguments").cloned().unwrap_or(json!({}));
 
-    Ok(ToolCall { id, name, arguments })
+    Ok(ToolCall {
+        id,
+        name,
+        arguments,
+    })
 }
 
 // ========== Tests ==========
@@ -253,9 +247,11 @@ mod tests {
             })
         });
 
-        let ctx = AgentContext {
-            messages: vec![ChatMessage::user("Hello")],
-        };
+        let ctx = AgentContext::new(
+            crate::platform::MessageSource::new("test", "test", None),
+            "user1".to_string(),
+            "session1".to_string(),
+        );
 
         let executor = ToolCallingAgentExecutor::new();
         let result = executor.execute_loop(&tools, &llm, &ctx).await.unwrap();
@@ -296,9 +292,12 @@ mod tests {
             json!({ "content": "Done" }),
         ]);
 
-        let ctx = AgentContext {
-            messages: vec![ChatMessage::user("Say hi")],
-        };
+        let mut ctx = AgentContext::new(
+            crate::platform::MessageSource::new("test", "test", None),
+            "user1".to_string(),
+            "session1".to_string(),
+        );
+        ctx.messages = vec![ChatMessage::user("Say hi")];
 
         let executor = ToolCallingAgentExecutor::new();
         let result = executor.execute_loop(&tools, &llm, &ctx).await.unwrap();
@@ -343,9 +342,12 @@ mod tests {
             },
         );
 
-        let ctx = AgentContext {
-            messages: vec![ChatMessage::user("Loop forever")],
-        };
+        let mut ctx = AgentContext::new(
+            crate::platform::MessageSource::new("test", "test", None),
+            "user1".to_string(),
+            "session1".to_string(),
+        );
+        ctx.messages = vec![ChatMessage::user("Loop forever")];
 
         let executor = ToolCallingAgentExecutor::new().with_max_iterations(2);
         let result = executor.execute_loop(&tools, &llm, &ctx).await.unwrap();

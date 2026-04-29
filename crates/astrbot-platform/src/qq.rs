@@ -1,8 +1,11 @@
-use async_trait::async_trait;
-use astrbot_core::errors::{AstrBotError, Result};
-use astrbot_core::message::{AstrBotMessage, MessageChain, MessageComponent, MessageMember, MessageType, HandlerRef, MessageHandler};
-use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
 use crate::adapter::PlatformAdapter;
+use astrbot_core::errors::{AstrBotError, Result};
+use astrbot_core::message::{
+    AstrBotMessage, HandlerRef, MessageChain, MessageComponent, MessageHandler, MessageMember,
+    MessageType,
+};
+use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
+use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -97,14 +100,22 @@ fn onebot_to_chain(segments: &[OneBotSegment]) -> MessageChain {
                 MessageComponent::Plain { text }
             }
             "image" => {
-                let url = seg.data.get("url").and_then(|v| v.as_str()).map(String::from);
+                let url = seg
+                    .data
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
                 let file_id = seg
                     .data
                     .get("file_id")
                     .or_else(|| seg.data.get("file"))
                     .and_then(|v| v.as_str())
                     .map(String::from);
-                MessageComponent::Image { url, file_id, base64: None }
+                MessageComponent::Image {
+                    url,
+                    file_id,
+                    base64: None,
+                }
             }
             "at" => {
                 let target = seg
@@ -127,17 +138,28 @@ fn onebot_to_chain(segments: &[OneBotSegment]) -> MessageChain {
                     .and_then(|v| v.as_str())
                     .unwrap_or("0")
                     .to_string();
-                MessageComponent::Reply { message_id, chain: None }
+                MessageComponent::Reply {
+                    message_id,
+                    chain: None,
+                }
             }
             "voice" | "record" => {
-                let url = seg.data.get("url").and_then(|v| v.as_str()).map(String::from);
+                let url = seg
+                    .data
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
                 let file_id = seg
                     .data
                     .get("file_id")
                     .or_else(|| seg.data.get("file"))
                     .and_then(|v| v.as_str())
                     .map(String::from);
-                MessageComponent::Voice { url, file_id, base64: None }
+                MessageComponent::Voice {
+                    url,
+                    file_id,
+                    base64: None,
+                }
             }
             "file" => {
                 let name = seg
@@ -146,7 +168,11 @@ fn onebot_to_chain(segments: &[OneBotSegment]) -> MessageChain {
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown")
                     .to_string();
-                let url = seg.data.get("url").and_then(|v| v.as_str()).map(String::from);
+                let url = seg
+                    .data
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
                 let file_id = seg
                     .data
                     .get("file_id")
@@ -186,7 +212,11 @@ fn chain_to_onebot(chain: &MessageChain) -> Vec<OneBotSegment> {
                     m
                 },
             },
-            MessageComponent::Image { url, file_id, base64 } => OneBotSegment {
+            MessageComponent::Image {
+                url,
+                file_id,
+                base64,
+            } => OneBotSegment {
                 seg_type: "image".to_string(),
                 data: {
                     let mut m = HashMap::new();
@@ -206,11 +236,18 @@ fn chain_to_onebot(chain: &MessageChain) -> Vec<OneBotSegment> {
                 seg_type: "reply".to_string(),
                 data: {
                     let mut m = HashMap::new();
-                    m.insert("id".to_string(), serde_json::Value::String(message_id.clone()));
+                    m.insert(
+                        "id".to_string(),
+                        serde_json::Value::String(message_id.clone()),
+                    );
                     m
                 },
             },
-            MessageComponent::Voice { url, file_id, base64 } => OneBotSegment {
+            MessageComponent::Voice {
+                url,
+                file_id,
+                base64,
+            } => OneBotSegment {
                 seg_type: "record".to_string(),
                 data: {
                     let mut m = HashMap::new();
@@ -260,7 +297,10 @@ fn chain_to_onebot(chain: &MessageChain) -> Vec<OneBotSegment> {
                 seg_type: "forward".to_string(),
                 data: {
                     let mut m = HashMap::new();
-                    m.insert("id".to_string(), serde_json::Value::String(message_id.clone()));
+                    m.insert(
+                        "id".to_string(),
+                        serde_json::Value::String(message_id.clone()),
+                    );
                     m
                 },
             },
@@ -326,7 +366,9 @@ async fn handle_ws_client(
 
                 // Echo heartbeat
                 if json.get("post_type").and_then(|v| v.as_str()) == Some("meta_event") {
-                    let _ = write.send(tokio_tungstenite::tungstenite::Message::Text(text)).await;
+                    let _ = write
+                        .send(tokio_tungstenite::tungstenite::Message::Text(text))
+                        .await;
                     continue;
                 }
 
@@ -351,7 +393,7 @@ async fn handle_ws_client(
             }
             Ok(None) => break,
             Ok(Some(Ok(_))) => {} // ignore Binary, Ping, Pong, Frame
-            Err(_) => {} // timeout, loop back to check running
+            Err(_) => {}          // timeout, loop back to check running
         }
     }
 
@@ -407,7 +449,14 @@ async fn run_ws_server(
         let token_clone = access_token.clone();
 
         tokio::spawn(async move {
-            handle_ws_client(ws_stream, handler_clone, connected_clone, running_clone, token_clone).await;
+            handle_ws_client(
+                ws_stream,
+                handler_clone,
+                connected_clone,
+                running_clone,
+                token_clone,
+            )
+            .await;
         });
     }
 }
@@ -556,10 +605,11 @@ impl PlatformAdapter for QQAdapter {
             });
         }
 
-        let api_resp: OneBotApiResponse = response.json().await.map_err(|e| AstrBotError::Platform {
-            adapter: "QQ".to_string(),
-            message: format!("Failed to parse API response: {}", e),
-        })?;
+        let api_resp: OneBotApiResponse =
+            response.json().await.map_err(|e| AstrBotError::Platform {
+                adapter: "QQ".to_string(),
+                message: format!("Failed to parse API response: {}", e),
+            })?;
 
         if api_resp.retcode != 0 {
             return Err(AstrBotError::Platform {
@@ -600,15 +650,28 @@ impl PlatformAdapter for QQAdapter {
 
     async fn send_voice(&self, target: &MessageSource, data: Vec<u8>, format: &str) -> Result<()> {
         if !self.running.load(Ordering::Relaxed) {
-            return Err(AstrBotError::Platform { adapter: "QQ".to_string(), message: "adapter not running".to_string() });
+            return Err(AstrBotError::Platform {
+                adapter: "QQ".to_string(),
+                message: "adapter not running".to_string(),
+            });
         }
-        let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
         let tmp_path = format!("/tmp/astrbot_voice_{}.{}", timestamp, format);
         if let Err(e) = tokio::fs::write(&tmp_path, &data).await {
-            return Err(AstrBotError::Platform { adapter: "QQ".to_string(), message: format!("Failed to write temp voice file: {}", e) });
+            return Err(AstrBotError::Platform {
+                adapter: "QQ".to_string(),
+                message: format!("Failed to write temp voice file: {}", e),
+            });
         }
         let mut chain = MessageChain::new();
-        chain.0.push(MessageComponent::Voice { url: Some(tmp_path.clone()), file_id: None, base64: None });
+        chain.0.push(MessageComponent::Voice {
+            url: Some(tmp_path.clone()),
+            file_id: None,
+            base64: None,
+        });
         let result = self.send_message(target, &chain).await;
         let _ = tokio::fs::remove_file(&tmp_path).await;
         result

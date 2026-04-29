@@ -1,7 +1,7 @@
 use astrbot_feishu::{
     auth::FeishuAuth,
-    platform::{FeishuAdapter, FeishuAdapterConfig},
     models::AppCredentials,
+    platform::{FeishuAdapter, FeishuAdapterConfig},
 };
 
 #[tokio::main]
@@ -18,7 +18,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let adapter = FeishuAdapter::new(auth, config);
 
     let chat_id = std::env::var("FEISHU_TEST_CHAT_ID").unwrap_or("oc_xxx".into());
-    let msg_id = adapter.send_text(&chat_id, "AstrBot Feishu adapter online 🚀").await?;
+    let msg_id = adapter
+        .send_text(&chat_id, "AstrBot Feishu adapter online 🚀")
+        .await?;
     println!("Sent message: {}", msg_id);
 
     Ok(())

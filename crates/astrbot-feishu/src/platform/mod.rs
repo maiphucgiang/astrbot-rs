@@ -34,10 +34,7 @@ impl Default for FeishuAdapterConfig {
 #[async_trait]
 pub trait MessageHandler: Send + Sync {
     /// Process an incoming message. Return a reply string if applicable.
-    async fn handle_message(
-        &self,
-        msg: &IncomingMessage,
-    ) -> Result<Option<OutgoingMessage>>;
+    async fn handle_message(&self, msg: &IncomingMessage) -> Result<Option<OutgoingMessage>>;
 }
 
 /// Feishu platform adapter
@@ -53,16 +50,14 @@ impl FeishuAdapter {
     }
 
     /// Send a text message to a chat
-    pub async fn send_text(&self,
-        chat_id: &str,
-        text: &str,
-    ) -> Result<String> {
+    pub async fn send_text(&self, chat_id: &str, text: &str) -> Result<String> {
         let content = json!({ "text": text });
         self.send_message(chat_id, "text", content).await
     }
 
     /// Send a rich text (post) message
-    pub async fn send_post(&self,
+    pub async fn send_post(
+        &self,
         chat_id: &str,
         title: &str,
         content: serde_json::Value,
@@ -77,10 +72,7 @@ impl FeishuAdapter {
     }
 
     /// Send an interactive card
-    pub async fn send_card(&self,
-        chat_id: &str,
-        card: serde_json::Value,
-    ) -> Result<String> {
+    pub async fn send_card(&self, chat_id: &str, card: serde_json::Value) -> Result<String> {
         let content = json!({ "card": card });
         self.send_message(chat_id, "interactive", content).await
     }
@@ -104,16 +96,10 @@ impl FeishuAdapter {
             .auth_request(Method::POST, "/im/v1/messages")
             .await?;
 
-        let resp = req
-            .json(&body)
-            .send()
-            .await
-            .map_err(FeishuError::Http)?;
+        let resp = req.json(&body).send().await.map_err(FeishuError::Http)?;
 
-        let api_resp: crate::ApiResponse<serde_json::Value> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: crate::ApiResponse<serde_json::Value> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 {
             return Err(FeishuError::Api {
@@ -124,7 +110,10 @@ impl FeishuAdapter {
 
         let message_id = api_resp
             .data
-            .and_then(|d| d.get("message_id").and_then(|v| v.as_str().map(|s| s.to_string())))
+            .and_then(|d| {
+                d.get("message_id")
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+            })
             .unwrap_or_default();
 
         info!("Message sent to {}, id={}", chat_id, message_id);
@@ -148,10 +137,8 @@ impl FeishuAdapter {
         let req = self.auth.auth_request(Method::POST, &path).await?;
 
         let resp = req.json(&body).send().await.map_err(FeishuError::Http)?;
-        let api_resp: crate::ApiResponse<serde_json::Value> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: crate::ApiResponse<serde_json::Value> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 {
             return Err(FeishuError::Api {
@@ -162,7 +149,10 @@ impl FeishuAdapter {
 
         let message_id = api_resp
             .data
-            .and_then(|d| d.get("message_id").and_then(|v| v.as_str().map(|s| s.to_string())))
+            .and_then(|d| {
+                d.get("message_id")
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+            })
             .unwrap_or_default();
 
         Ok(message_id)
@@ -174,10 +164,8 @@ impl FeishuAdapter {
         let req = self.auth.auth_request(Method::GET, &path).await?;
         let resp = req.send().await.map_err(FeishuError::Http)?;
 
-        let api_resp: crate::ApiResponse<FeishuChat> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: crate::ApiResponse<FeishuChat> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 || api_resp.data.is_none() {
             return Err(FeishuError::Api {
@@ -195,10 +183,8 @@ impl FeishuAdapter {
         let req = self.auth.auth_request(Method::GET, &path).await?;
         let resp = req.send().await.map_err(FeishuError::Http)?;
 
-        let api_resp: crate::ApiResponse<FeishuUser> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: crate::ApiResponse<FeishuUser> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 || api_resp.data.is_none() {
             return Err(FeishuError::Api {
@@ -218,7 +204,9 @@ impl FeishuAdapter {
         signature: &str,
         body: &str,
     ) -> Result<Option<WebhookEvent>> {
-        let valid = self.auth.verify_webhook(timestamp, nonce, body, signature)?;
+        let valid = self
+            .auth
+            .verify_webhook(timestamp, nonce, body, signature)?;
         if !valid {
             warn!("Webhook signature verification failed");
             return Err(FeishuError::WebhookVerify);

@@ -126,10 +126,8 @@ impl PersonaManager {
 
     /// 删除人格（内置人格不可删除）
     pub fn remove_persona(&self, id: &str) -> Result<()> {
-        let builtin_ids: std::collections::HashSet<String> = PersonaPresets::all()
-            .into_iter()
-            .map(|p| p.id)
-            .collect();
+        let builtin_ids: std::collections::HashSet<String> =
+            PersonaPresets::all().into_iter().map(|p| p.id).collect();
 
         if builtin_ids.contains(id) {
             bail!("Cannot remove built-in persona '{}'", id);
@@ -152,10 +150,7 @@ impl PersonaManager {
 
     /// 生成风格化回复（核心创意功能）
     /// 根据人格的 reply_style 模板，将原始回复转换为目标风格
-    pub fn generate_reply(&self,
-        raw_text: &str,
-        persona: Option<&Persona>,
-    ) -> Result<String> {
+    pub fn generate_reply(&self, raw_text: &str, persona: Option<&Persona>) -> Result<String> {
         // 1. 安全检查：净化用户输入
         let safe_text = PromptSafety::sanitize(raw_text);
         PromptSafety::check_user_input(&safe_text)?;
@@ -182,7 +177,8 @@ impl PersonaManager {
         }
 
         // 添加结尾
-        let ending = style.ending_pattern
+        let ending = style
+            .ending_pattern
             .replace("{summary}", "以上")
             .replace("{answer}", "就这样");
         if !result.ends_with(&ending) {
@@ -224,26 +220,18 @@ impl PersonaManager {
             }
             r if r.contains("长句") => {
                 // 合并短句
-                text.replace("……", "，")
-                    .replace("\n", "，")
+                text.replace("……", "，").replace("\n", "，")
             }
             _ => text.to_string(),
         }
     }
 
     /// 辅助：应用 emoji 风格
-    fn apply_emoji_style(&self,
-        mut text: String,
-        rule: &str,
-        persona: &Persona,
-    ) -> String {
+    fn apply_emoji_style(&self, mut text: String, rule: &str, persona: &Persona) -> String {
         match rule {
             "严禁" | "不用" | "不用，用文字表情" => {
                 // 移除所有 emoji
-                text = text
-                    .chars()
-                    .filter(|c| !is_emoji(*c))
-                    .collect();
+                text = text.chars().filter(|c| !is_emoji(*c)).collect();
             }
             "少量柔和emoji" | "偶尔用" => {
                 // 如果文本中没有 emoji，随机加一个人格相关的
@@ -275,21 +263,58 @@ impl PersonaManager {
         let text = lower.as_str();
 
         // 愤怒关键词
-        let angry_keywords = ["生气", "愤怒", "滚", "垃圾", "差", "怒", "fuck", "shit", "angry", "hate", "傻逼", "他妈", "操", "废物", "烂", "坑", "骗", "恶心", "讨厌"];
-        let angry_score = angry_keywords.iter().filter(|&&kw| text.contains(kw)).count();
+        let angry_keywords = [
+            "生气", "愤怒", "滚", "垃圾", "差", "怒", "fuck", "shit", "angry", "hate", "傻逼",
+            "他妈", "操", "废物", "烂", "坑", "骗", "恶心", "讨厌",
+        ];
+        let angry_score = angry_keywords
+            .iter()
+            .filter(|&&kw| text.contains(kw))
+            .count();
 
         // 悲伤关键词
-        let sad_keywords = ["难过", "伤心", "哭", "失望", "惨", "累", "sad", "sorry", "depressed", "难受", "痛苦", "绝望", "孤独", "无助", "迷茫", "失败"];
+        let sad_keywords = [
+            "难过",
+            "伤心",
+            "哭",
+            "失望",
+            "惨",
+            "累",
+            "sad",
+            "sorry",
+            "depressed",
+            "难受",
+            "痛苦",
+            "绝望",
+            "孤独",
+            "无助",
+            "迷茫",
+            "失败",
+        ];
         let sad_score = sad_keywords.iter().filter(|&&kw| text.contains(kw)).count();
 
         // 开心关键词
-        let happy_keywords = ["开心", "高兴", "谢谢", "哈哈", "棒", "好", "不错", "喜欢", "love", "happy", "great", "爽", "赞", "牛逼", "厉害", "成功", "完美", "舒服", "爱你"];
-        let happy_score = happy_keywords.iter().filter(|&&kw| text.contains(kw)).count();
+        let happy_keywords = [
+            "开心", "高兴", "谢谢", "哈哈", "棒", "好", "不错", "喜欢", "love", "happy", "great",
+            "爽", "赞", "牛逼", "厉害", "成功", "完美", "舒服", "爱你",
+        ];
+        let happy_score = happy_keywords
+            .iter()
+            .filter(|&&kw| text.contains(kw))
+            .count();
 
         // 选择最高分情绪
-        let scores = [(EmotionState::Angry, angry_score), (EmotionState::Sad, sad_score), (EmotionState::Happy, happy_score)];
+        let scores = [
+            (EmotionState::Angry, angry_score),
+            (EmotionState::Sad, sad_score),
+            (EmotionState::Happy, happy_score),
+        ];
         let max = scores.iter().max_by_key(|(_, s)| *s).unwrap();
-        if max.1 > 0 { max.0.clone() } else { EmotionState::Neutral }
+        if max.1 > 0 {
+            max.0.clone()
+        } else {
+            EmotionState::Neutral
+        }
     }
 
     /// 根据对话上下文自动切换人格
@@ -311,18 +336,35 @@ impl PersonaManager {
     }
 
     /// 根据情绪和 switch_conditions 匹配目标人格
-    fn match_switch_condition(&self, current: &Persona, emotion: &EmotionState, _input: &str) -> Option<String> {
+    fn match_switch_condition(
+        &self,
+        current: &Persona,
+        emotion: &EmotionState,
+        _input: &str,
+    ) -> Option<String> {
         // 1. 先检查当前人格自己的 switch_conditions
         for cond in &current.switch_conditions {
             let cond_lower = cond.to_lowercase();
             match emotion {
-                EmotionState::Happy if cond_lower.contains("沙雕") || cond_lower.contains("搞笑") || cond_lower.contains("emoji") => {
+                EmotionState::Happy
+                    if cond_lower.contains("沙雕")
+                        || cond_lower.contains("搞笑")
+                        || cond_lower.contains("emoji") =>
+                {
                     return self.find_persona_by_keyword("沙雕搞笑");
                 }
-                EmotionState::Angry if cond_lower.contains("毒舌") || cond_lower.contains("吐槽") || cond_lower.contains("强烈情绪") => {
+                EmotionState::Angry
+                    if cond_lower.contains("毒舌")
+                        || cond_lower.contains("吐槽")
+                        || cond_lower.contains("强烈情绪") =>
+                {
                     return self.find_persona_by_keyword("毒舌");
                 }
-                EmotionState::Sad if cond_lower.contains("温柔") || cond_lower.contains("安慰") || cond_lower.contains("情绪") => {
+                EmotionState::Sad
+                    if cond_lower.contains("温柔")
+                        || cond_lower.contains("安慰")
+                        || cond_lower.contains("情绪") =>
+                {
                     return self.find_persona_by_keyword("温柔");
                 }
                 _ => {}
@@ -423,7 +465,8 @@ impl PersonaManager {
         let tone = serde_json::to_string(&p.tone).unwrap_or_else(|_| "[]".into());
         let catchphrases = serde_json::to_string(&p.catchphrases).unwrap_or_else(|_| "[]".into());
         let taboos = serde_json::to_string(&p.taboos).unwrap_or_else(|_| "[]".into());
-        let switch_conditions = serde_json::to_string(&p.switch_conditions).unwrap_or_else(|_| "[]".into());
+        let switch_conditions =
+            serde_json::to_string(&p.switch_conditions).unwrap_or_else(|_| "[]".into());
         let reply_style = serde_json::to_string(&p.reply_style).unwrap_or_else(|_| "{}".into());
 
         conn.execute(
@@ -432,9 +475,17 @@ impl PersonaManager {
               switch_conditions, reply_style, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             rusqlite::params![
-                &p.id, &p.name, &p.description, &p.system_prompt,
-                tone, catchphrases, taboos, switch_conditions, reply_style,
-                now, now
+                &p.id,
+                &p.name,
+                &p.description,
+                &p.system_prompt,
+                tone,
+                catchphrases,
+                taboos,
+                switch_conditions,
+                reply_style,
+                now,
+                now
             ],
         )?;
         Ok(())
@@ -454,12 +505,20 @@ impl PersonaManager {
         let tone: Vec<String> = serde_json::from_str(&tone_str).unwrap_or_default();
         let catchphrases: Vec<String> = serde_json::from_str(&catchphrases_str).unwrap_or_default();
         let taboos: Vec<String> = serde_json::from_str(&taboos_str).unwrap_or_default();
-        let switch_conditions: Vec<String> = serde_json::from_str(&switch_conditions_str).unwrap_or_default();
+        let switch_conditions: Vec<String> =
+            serde_json::from_str(&switch_conditions_str).unwrap_or_default();
         let reply_style: ReplyStyle = serde_json::from_str(&reply_style_str).unwrap_or_default();
 
         Ok(Persona {
-            id, name, description, system_prompt,
-            tone, catchphrases, taboos, switch_conditions, reply_style,
+            id,
+            name,
+            description,
+            system_prompt,
+            tone,
+            catchphrases,
+            taboos,
+            switch_conditions,
+            reply_style,
         })
     }
 
@@ -479,7 +538,7 @@ impl PersonaManager {
         let mut stmt = conn.prepare(
             "SELECT id, name, description, system_prompt, tone, catchphrases,
                     taboos, switch_conditions, reply_style
-             FROM personas_v2"
+             FROM personas_v2",
         )?;
         let rows = stmt.query_map([], Self::row_to_persona)?;
 
@@ -491,7 +550,8 @@ impl PersonaManager {
         drop(guard);
 
         // 加载当前激活人格
-        let mut stmt = conn.prepare("SELECT persona_id FROM active_persona WHERE key = 'active'")?;
+        let mut stmt =
+            conn.prepare("SELECT persona_id FROM active_persona WHERE key = 'active'")?;
         let active_id: Result<String, _> = stmt.query_row([], |row| row.get(0));
         if let Ok(id) = active_id {
             let guard = self.personas.lock().unwrap();
@@ -581,7 +641,7 @@ impl PersonaManager {
         let mut stmt = conn.prepare(
             "SELECT id, name, description, system_prompt, tone, catchphrases,
                     taboos, switch_conditions, reply_style
-             FROM personas_v2"
+             FROM personas_v2",
         )?;
         let rows = stmt.query_map([], Self::row_to_persona)?;
 
@@ -643,7 +703,9 @@ mod tests {
     fn test_generate_reply() {
         let mgr = test_manager();
         let persona = mgr.switch_persona("overbearing_president").unwrap();
-        let reply = mgr.generate_reply("The weather is nice today", Some(&persona)).unwrap();
+        let reply = mgr
+            .generate_reply("The weather is nice today", Some(&persona))
+            .unwrap();
         // 霸道总裁型应该很短
         assert!(reply.len() < 100);
     }
@@ -717,9 +779,15 @@ mod tests {
         let mgr = test_manager();
 
         assert_eq!(mgr.detect_emotion("今天好开心啊哈哈"), EmotionState::Happy);
-        assert_eq!(mgr.detect_emotion("什么垃圾东西，气死我了"), EmotionState::Angry);
+        assert_eq!(
+            mgr.detect_emotion("什么垃圾东西，气死我了"),
+            EmotionState::Angry
+        );
         assert_eq!(mgr.detect_emotion("好难过，心里很难受"), EmotionState::Sad);
-        assert_eq!(mgr.detect_emotion("请帮我查一下天气"), EmotionState::Neutral);
+        assert_eq!(
+            mgr.detect_emotion("请帮我查一下天气"),
+            EmotionState::Neutral
+        );
     }
 
     #[test]
@@ -731,7 +799,9 @@ mod tests {
         assert_eq!(active.id, "hakimi_guardian");
 
         // 愤怒输入 -> 应该切到毒舌吐槽型
-        let (switched, new_id) = mgr.auto_switch_by_context("这什么傻逼功能，烂透了").unwrap();
+        let (switched, new_id) = mgr
+            .auto_switch_by_context("这什么傻逼功能，烂透了")
+            .unwrap();
         assert!(switched, "应该触发切换");
         assert_eq!(new_id, "poison_tongue");
 

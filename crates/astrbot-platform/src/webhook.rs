@@ -1,8 +1,14 @@
-use async_trait::async_trait;
-use astrbot_core::errors::{AstrBotError, Result};
-use astrbot_core::message::{AstrBotMessage, MessageChain, MessageComponent, MessageMember, MessageType, HandlerRef, MessageHandler};
-use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
 use crate::adapter::PlatformAdapter;
+use astrbot_core::errors::{AstrBotError, Result};
+use astrbot_core::message::{
+    AstrBotMessage, HandlerRef, MessageChain, MessageComponent, MessageHandler, MessageMember,
+    MessageType,
+};
+use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
+use async_trait::async_trait;
+use chrono::Utc;
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -10,9 +16,6 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
-use chrono::Utc;
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
 
 // Type alias for HMAC-SHA256
 type HmacSha256 = Hmac<Sha256>;
@@ -22,7 +25,10 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
     if a.len() != b.len() {
         return false;
     }
-    a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+    a.bytes()
+        .zip(b.bytes())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
 }
 
 // ---------------------------------------------------------------------------
@@ -67,7 +73,9 @@ async fn run_webhook_loop(
             Ok(Some(payload)) => {
                 // Optional signature verification
                 if let Some(ref secret) = secret_token {
-                    let signature = payload.headers.get("x-signature")
+                    let signature = payload
+                        .headers
+                        .get("x-signature")
                         .or_else(|| payload.headers.get("X-Signature"))
                         .or_else(|| payload.headers.get("x-hub-signature-256"))
                         .or_else(|| payload.headers.get("X-Hub-Signature-256"));
@@ -75,8 +83,8 @@ async fn run_webhook_loop(
                     match signature {
                         Some(sig_header) => {
                             // Parse expected signature: "sha256=<hex>" or raw hex
-                            let expected_hex = sig_header.strip_prefix("sha256=")
-                                .unwrap_or(sig_header);
+                            let expected_hex =
+                                sig_header.strip_prefix("sha256=").unwrap_or(sig_header);
 
                             // Compute HMAC-SHA256 of the body
                             let mut mac = match HmacSha256::new_from_slice(secret.as_bytes()) {
@@ -113,22 +121,26 @@ async fn run_webhook_loop(
                     }
                 };
 
-                let text = parsed.get("text")
+                let text = parsed
+                    .get("text")
                     .and_then(|v| v.as_str())
                     .unwrap_or(&payload.body)
                     .to_string();
 
-                let user_id = parsed.get("user_id")
+                let user_id = parsed
+                    .get("user_id")
                     .and_then(|v| v.as_str())
                     .unwrap_or("webhook_user")
                     .to_string();
 
-                let session_id = parsed.get("session_id")
+                let session_id = parsed
+                    .get("session_id")
                     .and_then(|v| v.as_str())
                     .unwrap_or("webhook_default")
                     .to_string();
 
-                let message_id = parsed.get("message_id")
+                let message_id = parsed
+                    .get("message_id")
                     .and_then(|v| v.as_str())
                     .unwrap_or("webhook_msg")
                     .to_string();
@@ -193,7 +205,11 @@ pub struct WebhookAdapter {
 }
 
 impl WebhookAdapter {
-    pub fn new(endpoint: impl Into<String>, secret_token: Option<String>, buffer: usize) -> (Self, WebhookShared) {
+    pub fn new(
+        endpoint: impl Into<String>,
+        secret_token: Option<String>,
+        buffer: usize,
+    ) -> (Self, WebhookShared) {
         let (tx, rx) = tokio::sync::mpsc::channel(buffer);
         let shared = WebhookShared {
             secret_token: secret_token.clone(),
@@ -243,7 +259,10 @@ impl PlatformAdapter for WebhookAdapter {
     }
 
     async fn initialize(&mut self) -> Result<()> {
-        info!("[Webhook] Initializing adapter (endpoint={})...", self.shared.endpoint);
+        info!(
+            "[Webhook] Initializing adapter (endpoint={})...",
+            self.shared.endpoint
+        );
         Ok(())
     }
 

@@ -80,9 +80,18 @@ fn default_zh_pack() -> TranslationPack {
     pack.insert("welcome".to_string(), "欢迎使用 AstrBot！".to_string());
     pack.insert("error".to_string(), "出错了，请稍后再试。".to_string());
     pack.insert("help".to_string(), "发送 /help 查看帮助信息。".to_string());
-    pack.insert("unknown_command".to_string(), "未知命令，请检查输入。".to_string());
-    pack.insert("rate_limited".to_string(), "请求过于频繁，请稍后再试。".to_string());
-    pack.insert("permission_denied".to_string(), "权限不足，无法执行该操作。".to_string());
+    pack.insert(
+        "unknown_command".to_string(),
+        "未知命令，请检查输入。".to_string(),
+    );
+    pack.insert(
+        "rate_limited".to_string(),
+        "请求过于频繁，请稍后再试。".to_string(),
+    );
+    pack.insert(
+        "permission_denied".to_string(),
+        "权限不足，无法执行该操作。".to_string(),
+    );
     pack.insert("not_found".to_string(), "未找到相关内容。".to_string());
     pack.insert("success".to_string(), "操作成功！".to_string());
     pack.insert("loading".to_string(), "正在处理中，请稍候……".to_string());
@@ -96,17 +105,44 @@ fn default_zh_pack() -> TranslationPack {
 fn default_en_pack() -> TranslationPack {
     let mut pack = TranslationPack::new();
     pack.insert("welcome".to_string(), "Welcome to AstrBot!".to_string());
-    pack.insert("error".to_string(), "Something went wrong, please try again later.".to_string());
-    pack.insert("help".to_string(), "Send /help for help information.".to_string());
-    pack.insert("unknown_command".to_string(), "Unknown command, please check your input.".to_string());
-    pack.insert("rate_limited".to_string(), "Too many requests, please try again later.".to_string());
-    pack.insert("permission_denied".to_string(), "Permission denied.".to_string());
-    pack.insert("not_found".to_string(), "No related content found.".to_string());
+    pack.insert(
+        "error".to_string(),
+        "Something went wrong, please try again later.".to_string(),
+    );
+    pack.insert(
+        "help".to_string(),
+        "Send /help for help information.".to_string(),
+    );
+    pack.insert(
+        "unknown_command".to_string(),
+        "Unknown command, please check your input.".to_string(),
+    );
+    pack.insert(
+        "rate_limited".to_string(),
+        "Too many requests, please try again later.".to_string(),
+    );
+    pack.insert(
+        "permission_denied".to_string(),
+        "Permission denied.".to_string(),
+    );
+    pack.insert(
+        "not_found".to_string(),
+        "No related content found.".to_string(),
+    );
     pack.insert("success".to_string(), "Operation successful!".to_string());
-    pack.insert("loading".to_string(), "Processing, please wait...".to_string());
+    pack.insert(
+        "loading".to_string(),
+        "Processing, please wait...".to_string(),
+    );
     pack.insert("cancelled".to_string(), "Operation cancelled.".to_string());
-    pack.insert("timeout".to_string(), "Request timed out, please retry.".to_string());
-    pack.insert("invalid_input".to_string(), "Invalid input format.".to_string());
+    pack.insert(
+        "timeout".to_string(),
+        "Request timed out, please retry.".to_string(),
+    );
+    pack.insert(
+        "invalid_input".to_string(),
+        "Invalid input format.".to_string(),
+    );
     pack
 }
 
@@ -135,7 +171,10 @@ mod tests {
         );
 
         // Missing key in both -> returns key itself
-        assert_eq!(i18n.get_or_default("en", "missing_key", "zh"), "missing_key");
+        assert_eq!(
+            i18n.get_or_default("en", "missing_key", "zh"),
+            "missing_key"
+        );
     }
 
     #[test]

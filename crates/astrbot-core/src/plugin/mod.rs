@@ -77,27 +77,20 @@ impl PluginContext {
     }
 
     /// Send a message to a target (plugin → platform)
-    pub async fn send_message(
-        &self,
-        source: &MessageSource,
-        chain: MessageChain,
-    ) -> Result<()> {
+    pub async fn send_message(&self, source: &MessageSource, chain: MessageChain) -> Result<()> {
         if let Some(ref sender) = self.message_sender {
             sender.send(source, chain).await
         } else {
             Err(crate::errors::AstrBotError::Internal(
-                "Message sender not available in PluginContext".to_string()
+                "Message sender not available in PluginContext".to_string(),
             ))
         }
     }
 
     /// Send plain text to a target (convenience)
-    pub async fn send_text(
-        &self,
-        source: &MessageSource,
-        text: impl Into<String>,
-    ) -> Result<()> {
-        self.send_message(source, MessageChain::new().text(text)).await
+    pub async fn send_text(&self, source: &MessageSource, text: impl Into<String>) -> Result<()> {
+        self.send_message(source, MessageChain::new().text(text))
+            .await
     }
 
     /// Get a config value
@@ -150,9 +143,9 @@ pub trait Plugin: Send + Sync {
         _source: &MessageSource,
         _user_id: &str,
     ) -> Result<MessageEventResult> {
-        Err(crate::errors::AstrBotError::NotFound(
-            format!("Command not handled by this plugin")
-        ))
+        Err(crate::errors::AstrBotError::NotFound(format!(
+            "Command not handled by this plugin"
+        )))
     }
 }
 

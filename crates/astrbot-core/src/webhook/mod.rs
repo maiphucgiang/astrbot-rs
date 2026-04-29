@@ -100,9 +100,8 @@ impl WebhookManager {
         }
 
         // Validate URL is parseable
-        let _ = reqwest::Url::parse(&config.url).map_err(|e| {
-            AstrBotError::Validation(format!("invalid webhook url: {}", e))
-        })?;
+        let _ = reqwest::Url::parse(&config.url)
+            .map_err(|e| AstrBotError::Validation(format!("invalid webhook url: {}", e)))?;
 
         let id = config.id.clone();
         self.hooks.insert(id.clone(), config);
@@ -180,9 +179,8 @@ impl WebhookManager {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert(
             "X-Event-Type",
-            HeaderValue::from_str(event_type).unwrap_or_else(|_| {
-                HeaderValue::from_static("unknown")
-            }),
+            HeaderValue::from_str(event_type)
+                .unwrap_or_else(|_| HeaderValue::from_static("unknown")),
         );
 
         // Add HMAC signature if secret is configured
@@ -221,7 +219,10 @@ impl WebhookManager {
                         last_error = Some(format!("HTTP {}: {}", status, body));
                         warn!(
                             "webhook {} attempt {}/{} failed: {}",
-                            hook.id, attempt, max_attempts, last_error.as_ref().unwrap()
+                            hook.id,
+                            attempt,
+                            max_attempts,
+                            last_error.as_ref().unwrap()
                         );
                     }
                 }
@@ -389,7 +390,10 @@ mod tests {
 
         // Dispatch a "command" event — should not match
         let results = manager.dispatch("command", json!({"cmd": "/help"})).await;
-        assert!(results.is_empty(), "non-matching event should produce no dispatches");
+        assert!(
+            results.is_empty(),
+            "non-matching event should produce no dispatches"
+        );
     }
 
     #[tokio::test]
@@ -445,7 +449,11 @@ mod tests {
         let payload = json!({"action": "ping"});
         let results = manager.dispatch("notice", payload.clone()).await;
         assert_eq!(results.len(), 1);
-        assert!(results[0].success, "httpbin should accept POST: {:?}", results[0].error);
+        assert!(
+            results[0].success,
+            "httpbin should accept POST: {:?}",
+            results[0].error
+        );
     }
 
     #[tokio::test]

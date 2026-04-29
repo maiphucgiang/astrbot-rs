@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+pub mod sender;
 pub mod stt;
 pub mod tts;
-pub mod sender;
 
 pub use stt::{OpenAiWhisper, SenseVoiceStt, SttEngine};
-pub use tts::{OpenAiTts, AzureTts, EdgeTts, TtsEngine};
+pub use tts::{AzureTts, EdgeTts, OpenAiTts, TtsEngine};
 
 // ---------------------------------------------------------------------------
 // Voice Registry
@@ -90,7 +90,10 @@ mod tests {
     #[tokio::test]
     async fn test_tts_registry() {
         let registry = VoiceRegistry::new();
-        let tts = Arc::new(OpenAiTts::new("https://api.openai.com".into(), "sk-test".into()));
+        let tts = Arc::new(OpenAiTts::new(
+            "https://api.openai.com".into(),
+            "sk-test".into(),
+        ));
         registry.register_tts("openai".to_string(), tts).await;
 
         let list = registry.list_tts().await;
@@ -105,7 +108,10 @@ mod tests {
     #[tokio::test]
     async fn test_stt_registry() {
         let registry = VoiceRegistry::new();
-        let stt = Arc::new(OpenAiWhisper::new("https://api.openai.com".into(), "sk-test".into()));
+        let stt = Arc::new(OpenAiWhisper::new(
+            "https://api.openai.com".into(),
+            "sk-test".into(),
+        ));
         registry.register_stt("whisper".to_string(), stt).await;
 
         let list = registry.list_stt().await;

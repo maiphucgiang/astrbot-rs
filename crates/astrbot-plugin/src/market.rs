@@ -80,9 +80,8 @@ impl PluginMarketplace {
                 plugin: "market".to_string(),
                 message: format!("Failed to read cache: {}", e),
             })?;
-        let cached: CachedIndex = serde_json::from_str(&data).map_err(|e| {
-            AstrBotError::Serialization(format!("Cache JSON parse failed: {}", e))
-        })?;
+        let cached: CachedIndex = serde_json::from_str(&data)
+            .map_err(|e| AstrBotError::Serialization(format!("Cache JSON parse failed: {}", e)))?;
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
@@ -92,7 +91,10 @@ impl PluginMarketplace {
             return Ok(false);
         }
         self.plugins = cached.plugins;
-        info!("[PluginMarketplace] loaded {} plugins from cache", self.plugins.len());
+        info!(
+            "[PluginMarketplace] loaded {} plugins from cache",
+            self.plugins.len()
+        );
         Ok(true)
     }
 
@@ -109,9 +111,8 @@ impl PluginMarketplace {
                 .as_secs(),
             plugins: self.plugins.clone(),
         };
-        let json = serde_json::to_string_pretty(&cached).map_err(|e| {
-            AstrBotError::Serialization(format!("Cache JSON export failed: {}", e))
-        })?;
+        let json = serde_json::to_string_pretty(&cached)
+            .map_err(|e| AstrBotError::Serialization(format!("Cache JSON export failed: {}", e)))?;
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await.ok();
         }
@@ -131,11 +132,10 @@ impl PluginMarketplace {
             .build()
             .map_err(|e| AstrBotError::Internal(format!("HTTP client build failed: {}", e)))?;
 
-        let resp = client
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| AstrBotError::Internal(format!("Failed to fetch marketplace: {}", e)))?;
+        let resp =
+            client.get(url).send().await.map_err(|e| {
+                AstrBotError::Internal(format!("Failed to fetch marketplace: {}", e))
+            })?;
 
         if !resp.status().is_success() {
             return Err(AstrBotError::Internal(format!(
@@ -145,10 +145,9 @@ impl PluginMarketplace {
             )));
         }
 
-        let json = resp
-            .text()
-            .await
-            .map_err(|e| AstrBotError::Internal(format!("Failed to read marketplace body: {}", e)))?;
+        let json = resp.text().await.map_err(|e| {
+            AstrBotError::Internal(format!("Failed to read marketplace body: {}", e))
+        })?;
 
         let fetched: HashMap<String, MarketPlugin> = serde_json::from_str(&json).map_err(|e| {
             AstrBotError::Serialization(format!("Marketplace JSON parse failed: {}", e))
@@ -218,15 +217,17 @@ impl PluginMarketplace {
 
     /// Export marketplace to JSON string
     pub fn export_json(&self) -> Result<String> {
-        serde_json::to_string(&self.plugins)
-            .map_err(|e| AstrBotError::Serialization(format!("Marketplace JSON export failed: {}", e)))
+        serde_json::to_string(&self.plugins).map_err(|e| {
+            AstrBotError::Serialization(format!("Marketplace JSON export failed: {}", e))
+        })
     }
 
     /// Install a marketplace plugin by ID (delegates to PluginInstaller)
     pub async fn install(&self, id: &str, source_path: &std::path::Path) -> Result<PluginMetadata> {
-        let installer = self.installer.as_ref().ok_or_else(|| {
-            AstrBotError::Internal("PluginInstaller not attached".to_string())
-        })?;
+        let installer = self
+            .installer
+            .as_ref()
+            .ok_or_else(|| AstrBotError::Internal("PluginInstaller not attached".to_string()))?;
         let plugin = self.plugins.get(id).ok_or_else(|| {
             AstrBotError::NotFound(format!("Plugin '{}' not found in marketplace", id))
         })?;
@@ -235,17 +236,19 @@ impl PluginMarketplace {
 
     /// Uninstall a plugin by ID (delegates to PluginInstaller)
     pub async fn uninstall(&self, id: &str) -> Result<()> {
-        let installer = self.installer.as_ref().ok_or_else(|| {
-            AstrBotError::Internal("PluginInstaller not attached".to_string())
-        })?;
+        let installer = self
+            .installer
+            .as_ref()
+            .ok_or_else(|| AstrBotError::Internal("PluginInstaller not attached".to_string()))?;
         installer.uninstall(id).await
     }
 
     /// Check if a plugin is installed
     pub async fn is_installed(&self, id: &str) -> Result<bool> {
-        let installer = self.installer.as_ref().ok_or_else(|| {
-            AstrBotError::Internal("PluginInstaller not attached".to_string())
-        })?;
+        let installer = self
+            .installer
+            .as_ref()
+            .ok_or_else(|| AstrBotError::Internal("PluginInstaller not attached".to_string()))?;
         Ok(installer.is_installed(id).await)
     }
 

@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
 use crate::platform::{MessageSource, PlatformType};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 /// Type of message event
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -38,17 +38,38 @@ pub enum MessageComponent {
     /// Plain text
     Plain { text: String },
     /// Mention / at someone
-    At { target: String, display: Option<String> },
+    At {
+        target: String,
+        display: Option<String>,
+    },
     /// Image
-    Image { url: Option<String>, file_id: Option<String>, base64: Option<String> },
+    Image {
+        url: Option<String>,
+        file_id: Option<String>,
+        base64: Option<String>,
+    },
     /// Voice / audio
-    Voice { url: Option<String>, file_id: Option<String>, base64: Option<String> },
+    Voice {
+        url: Option<String>,
+        file_id: Option<String>,
+        base64: Option<String>,
+    },
     /// File
-    File { name: String, url: Option<String>, file_id: Option<String> },
+    File {
+        name: String,
+        url: Option<String>,
+        file_id: Option<String>,
+    },
     /// Reply / quote
-    Reply { message_id: String, chain: Option<Vec<MessageComponent>> },
+    Reply {
+        message_id: String,
+        chain: Option<Vec<MessageComponent>>,
+    },
     /// Forward / share
-    Forward { message_id: String, summary: Option<String> },
+    Forward {
+        message_id: String,
+        summary: Option<String>,
+    },
     /// JSON payload (rich message)
     Json { data: serde_json::Value },
     /// XML payload
@@ -60,6 +81,16 @@ pub enum MessageComponent {
 pub struct MessageChain(pub Vec<MessageComponent>);
 
 impl MessageChain {
+    /// Get all components as a slice
+    pub fn components(&self) -> &[MessageComponent] {
+        &self.0
+    }
+
+    /// Get all components as a mutable slice
+    pub fn components_mut(&mut self) -> &mut [MessageComponent] {
+        &mut self.0
+    }
+
     /// Create an empty message chain
     pub fn new() -> Self {
         Self::default()
@@ -73,28 +104,47 @@ impl MessageChain {
 
     /// Add an @ mention
     pub fn at(mut self, target: impl Into<String>) -> Self {
-        self.0.push(MessageComponent::At { target: target.into(), display: None });
+        self.0.push(MessageComponent::At {
+            target: target.into(),
+            display: None,
+        });
         self
     }
 
     /// Add an image
     pub fn image_url(mut self, url: impl Into<String>) -> Self {
-        self.0.push(MessageComponent::Image { url: Some(url.into()), file_id: None, base64: None });
+        self.0.push(MessageComponent::Image {
+            url: Some(url.into()),
+            file_id: None,
+            base64: None,
+        });
         self
     }
 
     /// Add a reply / quote reference
-    pub fn reply(mut self, message_id: impl Into<String>, chain: Option<Vec<MessageComponent>>) -> Self {
-        self.0.push(MessageComponent::Reply { message_id: message_id.into(), chain });
+    pub fn reply(
+        mut self,
+        message_id: impl Into<String>,
+        chain: Option<Vec<MessageComponent>>,
+    ) -> Self {
+        self.0.push(MessageComponent::Reply {
+            message_id: message_id.into(),
+            chain,
+        });
         self
     }
 
     /// Get plain text concatenation
     pub fn plain_text(&self) -> String {
-        self.0.iter().filter_map(|c| match c {
-            MessageComponent::Plain { text } => Some(text.as_str()),
-            _ => None,
-        }).collect::<Vec<_>>().concat().to_string()
+        self.0
+            .iter()
+            .filter_map(|c| match c {
+                MessageComponent::Plain { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .concat()
+            .to_string()
     }
 
     /// Check if chain contains a specific component type
@@ -119,9 +169,9 @@ impl MessageChain {
     /// Extract command name and args if this is a command
     pub fn parse_command(&self, prefixes: &[char]) -> Option<(String, Vec<String>)> {
         let text = self.plain_text();
-        let stripped = prefixes.iter().find_map(|p| {
-            text.strip_prefix(*p).map(|s| s.trim())
-        })?;
+        let stripped = prefixes
+            .iter()
+            .find_map(|p| text.strip_prefix(*p).map(|s| s.trim()))?;
         if stripped.is_empty() {
             return None;
         }
@@ -172,7 +222,10 @@ pub enum MessageEventResult {
     /// No reply needed
     Nothing,
     /// Forward to another session
-    Forward { target: MessageSource, chain: MessageChain },
+    Forward {
+        target: MessageSource,
+        chain: MessageChain,
+    },
 }
 
 impl MessageEventResult {
@@ -183,7 +236,9 @@ impl MessageEventResult {
 
     /// Create a text-only reply
     pub fn reply_text(text: impl Into<String>) -> Self {
-        Self::Reply { chain: MessageChain::new().text(text) }
+        Self::Reply {
+            chain: MessageChain::new().text(text),
+        }
     }
 
     /// Create a nothing result

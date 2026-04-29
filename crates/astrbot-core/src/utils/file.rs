@@ -1,5 +1,5 @@
-use std::path::Path;
 use crate::errors::{AstrBotError, Result};
+use std::path::Path;
 
 /// Ensure a directory exists
 pub async fn ensure_dir<P: AsRef<Path>>(path: P) -> Result<()> {

@@ -189,7 +189,10 @@ impl TtsEngine for AzureTts {
             .post(&url)
             .header("Ocp-Apim-Subscription-Key", &self.api_key)
             .header("Content-Type", "application/ssml+xml")
-            .header("X-Microsoft-OutputFormat", "audio-24khz-160kbitrate-mono-mp3")
+            .header(
+                "X-Microsoft-OutputFormat",
+                "audio-24khz-160kbitrate-mono-mp3",
+            )
             .body(body)
             .send()
             .await
@@ -197,7 +200,10 @@ impl TtsEngine for AzureTts {
         let status = resp.status();
         if !status.is_success() {
             let err = resp.text().await.unwrap_or_default();
-            return Err(AstrBotError::Network(format!("Azure TTS HTTP {}: {}", status, err)));
+            return Err(AstrBotError::Network(format!(
+                "Azure TTS HTTP {}: {}",
+                status, err
+            )));
         }
         let audio = resp
             .bytes()
@@ -207,7 +213,10 @@ impl TtsEngine for AzureTts {
     }
     async fn health_check(&self) -> Result<()> {
         let client = reqwest::Client::new();
-        let url = format!("https://{}.api.cognitive.microsoft.com/sts/v1.0/issueToken", self.region);
+        let url = format!(
+            "https://{}.api.cognitive.microsoft.com/sts/v1.0/issueToken",
+            self.region
+        );
         let resp = client
             .post(&url)
             .header("Ocp-Apim-Subscription-Key", &self.api_key)
@@ -218,7 +227,10 @@ impl TtsEngine for AzureTts {
         if resp.status().is_success() {
             Ok(())
         } else {
-            Err(AstrBotError::Network(format!("Azure TTS health failed: HTTP {}", resp.status())))
+            Err(AstrBotError::Network(format!(
+                "Azure TTS health failed: HTTP {}",
+                resp.status()
+            )))
         }
     }
 }
@@ -269,7 +281,9 @@ impl TtsEngine for EdgeTts {
         info!("[EdgeTts] synthesize — {} chars", text.len());
         // Edge TTS uses WebSocket to speech.platform.bing.com
         // Skeleton: return a placeholder error for now
-        Err(AstrBotError::Internal("EdgeTTS WebSocket implementation pending".to_string()))
+        Err(AstrBotError::Internal(
+            "EdgeTTS WebSocket implementation pending".to_string(),
+        ))
     }
     async fn health_check(&self) -> Result<()> {
         Ok(())

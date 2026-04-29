@@ -81,13 +81,17 @@ CREATE TABLE IF NOT EXISTS migration_meta (
     name TEXT NOT NULL,
     applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-            "#.to_string(),
-            down_sql: Some(r#"
+            "#
+            .to_string(),
+            down_sql: Some(
+                r#"
 DROP TABLE IF EXISTS messages;
 DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS config_store;
 DROP TABLE IF EXISTS migration_meta;
-            "#.to_string()),
+            "#
+                .to_string(),
+            ),
         });
 
         // V2: Plugin metadata table
@@ -103,10 +107,14 @@ CREATE TABLE IF NOT EXISTS plugin_metadata (
     config_json TEXT,
     installed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-            "#.to_string(),
-            down_sql: Some(r#"
+            "#
+            .to_string(),
+            down_sql: Some(
+                r#"
 DROP TABLE IF EXISTS plugin_metadata;
-            "#.to_string()),
+            "#
+                .to_string(),
+            ),
         });
 
         // V3: Safety audit log
@@ -122,10 +130,14 @@ CREATE TABLE IF NOT EXISTS safety_audit_log (
     details TEXT,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-            "#.to_string(),
-            down_sql: Some(r#"
+            "#
+            .to_string(),
+            down_sql: Some(
+                r#"
 DROP TABLE IF EXISTS safety_audit_log;
-            "#.to_string()),
+            "#
+                .to_string(),
+            ),
         });
     }
 }
@@ -143,18 +155,19 @@ impl MigrationRunner {
 
     /// Get current schema version from DB
     pub async fn current_version(&self) -> Result<i64> {
-        let result = sqlx::query_as::<_, (i64,)>(
-            "SELECT MAX(version) FROM migration_meta"
-        )
-        .fetch_optional(&self.pool)
-        .await;
+        let result = sqlx::query_as::<_, (i64,)>("SELECT MAX(version) FROM migration_meta")
+            .fetch_optional(&self.pool)
+            .await;
 
         match result {
             Ok(row) => Ok(row.map(|r| r.0).unwrap_or(0)),
             Err(sqlx::Error::Database(db_err)) if db_err.message().contains("no such table") => {
                 Ok(0)
             }
-            Err(e) => Err(AstrBotError::Database(format!("Migration version check: {}", e))),
+            Err(e) => Err(AstrBotError::Database(format!(
+                "Migration version check: {}",
+                e
+            ))),
         }
     }
 
@@ -166,29 +179,36 @@ impl MigrationRunner {
 
         for version in versions {
             if version > current {
-                let migration = self.registry.get(version)
-                    .ok_or_else(|| AstrBotError::Internal(format!("Migration {} not found", version)))?;
+                let migration = self.registry.get(version).ok_or_else(|| {
+                    AstrBotError::Internal(format!("Migration {} not found", version))
+                })?;
 
                 info!("Applying migration v{}: {}", version, migration.name);
 
                 // Run migration in a transaction
-                let mut tx = self.pool.begin().await
-                    .map_err(|e| AstrBotError::Database(format!("Migration transaction start: {}", e)))?;
+                let mut tx = self.pool.begin().await.map_err(|e| {
+                    AstrBotError::Database(format!("Migration transaction start: {}", e))
+                })?;
 
                 sqlx::query(&migration.up_sql)
                     .execute(&mut *tx)
                     .await
-                    .map_err(|e| AstrBotError::Database(format!("Migration v{} up failed: {}", version, e)))?;
+                    .map_err(|e| {
+                        AstrBotError::Database(format!("Migration v{} up failed: {}", version, e))
+                    })?;
 
                 sqlx::query("INSERT INTO migration_meta (version, name) VALUES (?, ?)")
                     .bind(version)
                     .bind(&migration.name)
                     .execute(&mut *tx)
                     .await
-                    .map_err(|e| AstrBotError::Database(format!("Migration v{} meta insert: {}", version, e)))?;
+                    .map_err(|e| {
+                        AstrBotError::Database(format!("Migration v{} meta insert: {}", version, e))
+                    })?;
 
-                tx.commit().await
-                    .map_err(|e| AstrBotError::Database(format!("Migration v{} commit: {}", version, e)))?;
+                tx.commit().await.map_err(|e| {
+                    AstrBotError::Database(format!("Migration v{} commit: {}", version, e))
+                })?;
 
                 applied.push(version);
                 info!("Migration v{} applied successfully", version);
@@ -213,33 +233,43 @@ impl MigrationRunner {
 
         for version in versions {
             if version > target_version && version <= current {
-                let migration = self.registry.get(version)
-                    .ok_or_else(|| AstrBotError::Internal(format!("Migration {} not found", version)))?;
+                let migration = self.registry.get(version).ok_or_else(|| {
+                    AstrBotError::Internal(format!("Migration {} not found", version))
+                })?;
 
                 if let Some(down_sql) = &migration.down_sql {
                     info!("Rolling back migration v{}: {}", version, migration.name);
 
-                    let mut tx = self.pool.begin().await
-                        .map_err(|e| AstrBotError::Database(format!("Rollback transaction start: {}", e)))?;
+                    let mut tx = self.pool.begin().await.map_err(|e| {
+                        AstrBotError::Database(format!("Rollback transaction start: {}", e))
+                    })?;
 
-                    sqlx::query(down_sql)
-                        .execute(&mut *tx)
-                        .await
-                        .map_err(|e| AstrBotError::Database(format!("Migration v{} down failed: {}", version, e)))?;
+                    sqlx::query(down_sql).execute(&mut *tx).await.map_err(|e| {
+                        AstrBotError::Database(format!("Migration v{} down failed: {}", version, e))
+                    })?;
 
                     sqlx::query("DELETE FROM migration_meta WHERE version = ?")
                         .bind(version)
                         .execute(&mut *tx)
                         .await
-                        .map_err(|e| AstrBotError::Database(format!("Migration v{} meta delete: {}", version, e)))?;
+                        .map_err(|e| {
+                            AstrBotError::Database(format!(
+                                "Migration v{} meta delete: {}",
+                                version, e
+                            ))
+                        })?;
 
-                    tx.commit().await
-                        .map_err(|e| AstrBotError::Database(format!("Rollback v{} commit: {}", version, e)))?;
+                    tx.commit().await.map_err(|e| {
+                        AstrBotError::Database(format!("Rollback v{} commit: {}", version, e))
+                    })?;
 
                     rolled_back.push(version);
                     info!("Migration v{} rolled back successfully", version);
                 } else {
-                    warn!("Migration v{} has no down script — cannot rollback", version);
+                    warn!(
+                        "Migration v{} has no down script — cannot rollback",
+                        version
+                    );
                 }
             }
         }

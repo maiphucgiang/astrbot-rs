@@ -39,7 +39,10 @@ impl KeywordFilter {
         let words = if case_sensitive {
             blocked_words.into_iter().collect()
         } else {
-            blocked_words.into_iter().map(|w| w.to_lowercase()).collect()
+            blocked_words
+                .into_iter()
+                .map(|w| w.to_lowercase())
+                .collect()
         };
         Self {
             name,
@@ -110,8 +113,7 @@ impl RegexFilter {
         }
     }
 
-    pub fn add_pattern(
-        &mut self, pattern: &str, description: impl Into<String>) -> Result<()> {
+    pub fn add_pattern(&mut self, pattern: &str, description: impl Into<String>) -> Result<()> {
         let regex = regex::Regex::new(pattern).map_err(|e| {
             AstrBotError::Internal(format!("Invalid regex pattern '{}': {}", pattern, e))
         })?;
@@ -132,7 +134,9 @@ impl SafetyStrategy for RegexFilter {
 
         for (i, pattern) in self.patterns.iter().enumerate() {
             if pattern.is_match(&text) {
-                let desc = self.descriptions.get(i)
+                let desc = self
+                    .descriptions
+                    .get(i)
                     .map(|d| d.as_str())
                     .unwrap_or("pattern matched");
                 return SafetyResult::Violation {
@@ -153,7 +157,7 @@ pub struct AiModeration {
     name: String,
     provider: std::sync::Arc<dyn crate::provider::Provider>,
     model: String,
-    threshold: f32,  // 0.0 ~ 1.0, content above this is flagged
+    threshold: f32, // 0.0 ~ 1.0, content above this is flagged
 }
 
 impl AiModeration {
@@ -193,15 +197,13 @@ Safety score:"#,
             text
         );
 
-        let messages = vec![
-            crate::provider::ChatMessage {
-                role: "user".to_string(),
-                content: prompt,
-                name: None,
-                tool_call_id: None,
-                tool_calls: None,
-            },
-        ];
+        let messages = vec![crate::provider::ChatMessage {
+            role: "user".to_string(),
+            content: prompt,
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }];
 
         let config = crate::provider::ChatConfig {
             model: Some(self.model.clone()),
@@ -218,7 +220,10 @@ Safety score:"#,
                 if let Ok(score) = score_str.parse::<f32>() {
                     if score >= self.threshold {
                         SafetyResult::Violation {
-                            reason: format!("AI moderation flagged content with score {:.2}", score),
+                            reason: format!(
+                                "AI moderation flagged content with score {:.2}",
+                                score
+                            ),
                             strategy: self.name.clone(),
                         }
                     } else {
@@ -230,11 +235,9 @@ Safety score:"#,
                     }
                 }
             }
-            Err(e) => {
-                SafetyResult::Error {
-                    message: format!("AI moderation API error: {}", e),
-                }
-            }
+            Err(e) => SafetyResult::Error {
+                message: format!("AI moderation API error: {}", e),
+            },
         }
     }
 }
@@ -273,9 +276,7 @@ impl SafetyEngine {
     }
 
     /// Check content against all strategies
-    pub async fn check(&self,
-        chain: &MessageChain,
-    ) -> Vec<SafetyResult> {
+    pub async fn check(&self, chain: &MessageChain) -> Vec<SafetyResult> {
         let mut results = Vec::new();
 
         for strategy in &self.strategies {
@@ -292,17 +293,13 @@ impl SafetyEngine {
     }
 
     /// Quick check: returns true if safe, false if any violation
-    pub async fn is_safe(&self,
-        chain: &MessageChain,
-    ) -> bool {
+    pub async fn is_safe(&self, chain: &MessageChain) -> bool {
         let results = self.check(chain).await;
         results.iter().all(|r| matches!(r, SafetyResult::Safe))
     }
 
     /// Get first violation reason if any
-    pub async fn first_violation(&self,
-        chain: &MessageChain,
-    ) -> Option<String> {
+    pub async fn first_violation(&self, chain: &MessageChain) -> Option<String> {
         let results = self.check(chain).await;
         for result in results {
             if let SafetyResult::Violation { reason, .. } = result {
@@ -317,19 +314,13 @@ impl SafetyEngine {
 pub fn preset_engine() -> SafetyEngine {
     let keyword_filter = KeywordFilter::new(
         "keyword",
-        vec![
-            "badword".to_string(),
-            "spam".to_string(),
-        ],
+        vec!["badword".to_string(), "spam".to_string()],
         false,
     );
 
     let mut regex_filter = RegexFilter::new("regex");
     // Detect URLs using regex pattern
-    let _ = regex_filter.add_pattern(
-        r"https?://[^\s]+",
-        "external URL detected",
-    );
+    let _ = regex_filter.add_pattern(r"https?://[^\s]+", "external URL detected");
 
     SafetyEngine::new()
         .add_strategy(Box::new(keyword_filter))

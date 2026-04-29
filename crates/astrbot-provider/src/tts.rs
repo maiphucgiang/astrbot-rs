@@ -54,7 +54,10 @@ impl TtsProvider for OpenAiCompatibleTts {
 
         let response = self
             .client
-            .post(format!("{}/v1/audio/speech", self.base_url.trim_end_matches('/')))
+            .post(format!(
+                "{}/v1/audio/speech",
+                self.base_url.trim_end_matches('/')
+            ))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&body)
             .send()

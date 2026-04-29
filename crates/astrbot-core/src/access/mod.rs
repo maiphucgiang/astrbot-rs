@@ -5,10 +5,10 @@
 //! - Whitelist / blacklist for user IDs
 //! - Admin bypass
 
+use chrono::{DateTime, Duration, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use chrono::{DateTime, Duration, Utc};
 use tracing::info;
 
 /// Rate limit exceeded
@@ -75,10 +75,13 @@ impl RateLimiter {
     /// Returns Ok(()) if allowed, Err(RateLimitExceeded) if not
     pub fn check(&mut self, user_id: &str) -> Result<(), RateLimitExceeded> {
         let now = Utc::now();
-        let window = self.windows.entry(user_id.to_string()).or_insert_with(|| RateWindow {
-            count: 0,
-            reset_at: now + Duration::seconds(self.config.window_seconds as i64),
-        });
+        let window = self
+            .windows
+            .entry(user_id.to_string())
+            .or_insert_with(|| RateWindow {
+                count: 0,
+                reset_at: now + Duration::seconds(self.config.window_seconds as i64),
+            });
 
         // Reset if window expired
         if now >= window.reset_at {

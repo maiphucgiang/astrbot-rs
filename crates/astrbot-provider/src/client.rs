@@ -1,7 +1,5 @@
 use astrbot_core::errors::{AstrBotError, Result};
-use astrbot_core::provider::{
-    ChatConfig, ChatMessage, ChatResponse, ChatStreamChunk, Provider,
-};
+use astrbot_core::provider::{ChatConfig, ChatMessage, ChatResponse, ChatStreamChunk, Provider};
 use futures_util::Stream;
 use tracing::{info, warn};
 

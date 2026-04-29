@@ -143,8 +143,8 @@ impl PersonaRegistry {
         let mut default_id: Option<String> = None;
 
         for row in rows {
-            let variables: HashMap<String, String> = serde_json::from_str(&row.variables)
-                .unwrap_or_default();
+            let variables: HashMap<String, String> =
+                serde_json::from_str(&row.variables).unwrap_or_default();
             let persona = Persona {
                 id: row.id.clone(),
                 name: row.name,
@@ -171,7 +171,10 @@ impl PersonaRegistry {
             *active_lock = Some(id);
         }
 
-        info!("[PersonaRegistry] Loaded {} persona(s) from DB", self.personas.read().await.len());
+        info!(
+            "[PersonaRegistry] Loaded {} persona(s) from DB",
+            self.personas.read().await.len()
+        );
         Ok(())
     }
 
@@ -180,8 +183,8 @@ impl PersonaRegistry {
         let Some(ref db) = self.db else {
             return Ok(());
         };
-        let variables_json = serde_json::to_string(&persona.variables)
-            .unwrap_or_else(|_| "{}".to_string());
+        let variables_json =
+            serde_json::to_string(&persona.variables).unwrap_or_else(|_| "{}".to_string());
         db.save_persona(
             &persona.id,
             &persona.name,
@@ -189,7 +192,8 @@ impl PersonaRegistry {
             &variables_json,
             persona.is_default,
             persona.description.as_deref(),
-        ).await
+        )
+        .await
     }
 
     /// Remove a persona from DB.
@@ -232,7 +236,10 @@ impl PersonaRegistry {
             let _ = self.persist_active(&id).await;
         }
 
-        info!("[PersonaRegistry] Loaded {} persona(s)", self.personas.read().await.len());
+        info!(
+            "[PersonaRegistry] Loaded {} persona(s)",
+            self.personas.read().await.len()
+        );
     }
 
     /// Register a single persona.
@@ -248,9 +255,10 @@ impl PersonaRegistry {
     pub async fn unregister(&self, id: &str) -> Result<()> {
         let active = self.active_id.read().await;
         if active.as_deref() == Some(id) {
-            return Err(AstrBotError::Validation(
-                format!("Cannot remove active persona: {}", id)
-            ));
+            return Err(AstrBotError::Validation(format!(
+                "Cannot remove active persona: {}",
+                id
+            )));
         }
         drop(active);
 
@@ -303,7 +311,10 @@ impl PersonaRegistry {
         drop(active);
         let _ = self.persist_active(id).await;
 
-        info!("[PersonaRegistry] Switched to persona: {} ({})", persona.name, id);
+        info!(
+            "[PersonaRegistry] Switched to persona: {} ({})",
+            persona.name, id
+        );
         Ok(persona)
     }
 
@@ -373,8 +384,7 @@ mod tests {
         let p1 = Persona::new("p1", "Friendly", "Be friendly, {{name}}.")
             .with_variable("name", "Friend")
             .with_default(true);
-        let p2 = Persona::new("p2", "Strict", "Be strict, {{name}}.")
-            .with_variable("name", "Sir");
+        let p2 = Persona::new("p2", "Strict", "Be strict, {{name}}.").with_variable("name", "Sir");
 
         registry.load(vec![p1, p2]).await;
 
@@ -443,8 +453,7 @@ mod tests {
     #[tokio::test]
     async fn test_persona_unregister_active_fails() {
         let registry = PersonaRegistry::new();
-        let p = Persona::new("active", "Active", "sys")
-            .with_default(true);
+        let p = Persona::new("active", "Active", "sys").with_default(true);
         registry.register(p).await;
         // Make it the active persona
         registry.switch("active").await.unwrap();
@@ -465,7 +474,10 @@ mod tests {
                 "is_default": true
             }
         ]"#;
-        registry.load_from_str(json, ConfigFormat::Json).await.unwrap();
+        registry
+            .load_from_str(json, ConfigFormat::Json)
+            .await
+            .unwrap();
 
         let active = registry.active().await.unwrap();
         assert_eq!(active.name, "Kimi");

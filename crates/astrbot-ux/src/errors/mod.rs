@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use lazy_static::lazy_static;
+use std::collections::HashMap;
 
 /// 错误翻译器：将技术错误转换为用户友好的消息
 pub struct ErrorTranslator;
@@ -18,27 +18,27 @@ pub enum ErrorCode {
     ProviderModelNotFound,
     ProviderContextExceeded,
     ProviderBalanceEmpty,
-    
+
     // 平台适配器类
     PlatformConnectionFailed,
     PlatformAuthFailed,
     PlatformMessageTooLong,
     PlatformBanned,
-    
+
     // 数据库类
     DbUniqueConstraint,
     DbNotFound,
     DbConnectionFailed,
-    
+
     // 配置类
     ConfigMissing,
     ConfigInvalid,
-    
+
     // 系统类
     PluginNotFound,
     PluginLoadFailed,
     PermissionDenied,
-    
+
     // 通用
     NetworkError,
     Unknown,
@@ -74,7 +74,7 @@ lazy_static! {
     /// ErrorCode → 翻译模板
     static ref ERROR_TEMPLATES: HashMap<ErrorCode, (&'static str, &'static str, &'static str)> = {
         let mut m = HashMap::new();
-        
+
         // Provider 类
         m.insert(ErrorCode::ProviderRateLimit, (
             "请求太快了",
@@ -106,7 +106,7 @@ lazy_static! {
             "服务商账户里没有余额了",
             "去服务商后台充值，或者切换到免费的模型（如 Ollama 本地部署）。"
         ));
-        
+
         // 平台适配器类
         m.insert(ErrorCode::PlatformConnectionFailed, (
             "暂时连不上平台",
@@ -128,7 +128,7 @@ lazy_static! {
             "平台风控或触发敏感词",
             "检查一下消息内容，避免敏感词。等几分钟再试。"
         ));
-        
+
         // 数据库类
         m.insert(ErrorCode::DbUniqueConstraint, (
             "这条记录已经存在了",
@@ -145,7 +145,7 @@ lazy_static! {
             "SQLite 文件可能被占用或损坏",
             "检查一下 data/ 目录权限，或者重启一下服务。"
         ));
-        
+
         // 配置类
         m.insert(ErrorCode::ConfigMissing, (
             "缺少配置文件",
@@ -157,7 +157,7 @@ lazy_static! {
             "YAML 语法错误或缺少必填项",
             "用 YAML 校验工具检查一下，或者对照文档逐项排查。"
         ));
-        
+
         // 系统类
         m.insert(ErrorCode::PluginNotFound, (
             "插件没找到",
@@ -174,7 +174,7 @@ lazy_static! {
             "这个操作需要管理员权限",
             "如果你就是管理员，把 QQ 号/用户 ID 填进 config 的 admin_id 里。"
         ));
-        
+
         // 通用
         m.insert(ErrorCode::NetworkError, (
             "网络出问题了",
@@ -186,7 +186,7 @@ lazy_static! {
             "未知错误",
             "把错误日志发给开发者看看，或者重启一下试试。"
         ));
-        
+
         m
     };
 }
@@ -200,12 +200,12 @@ impl ErrorTranslator {
     pub fn translate(&self, raw_error: &str) -> HumanizedError {
         let code = self.detect_code(raw_error);
         let level = self.infer_level(&code);
-        
+
         let (title, reason, suggestion) = ERROR_TEMPLATES
             .get(&code)
             .copied()
             .unwrap_or(ERROR_TEMPLATES.get(&ErrorCode::Unknown).copied().unwrap());
-        
+
         HumanizedError {
             code: code.clone(),
             level,
@@ -224,12 +224,18 @@ impl ErrorTranslator {
     /// 检测错误代码
     fn detect_code(&self, raw: &str) -> ErrorCode {
         let raw_lower = raw.to_lowercase();
-        
+
         // Provider 类
-        if raw_lower.contains("429") || raw_lower.contains("rate limit") || raw_lower.contains("too many requests") {
+        if raw_lower.contains("429")
+            || raw_lower.contains("rate limit")
+            || raw_lower.contains("too many requests")
+        {
             return ErrorCode::ProviderRateLimit;
         }
-        if raw_lower.contains("invalid api key") || raw_lower.contains("unauthorized") || raw_lower.contains("api key") {
+        if raw_lower.contains("invalid api key")
+            || raw_lower.contains("unauthorized")
+            || raw_lower.contains("api key")
+        {
             return ErrorCode::ProviderInvalidKey;
         }
         if raw_lower.contains("timeout") && raw_lower.contains("provider") {
@@ -238,15 +244,23 @@ impl ErrorTranslator {
         if raw_lower.contains("model not found") || raw_lower.contains("model does not exist") {
             return ErrorCode::ProviderModelNotFound;
         }
-        if raw_lower.contains("context length") || raw_lower.contains("context exceeded") || raw_lower.contains("maximum context") {
+        if raw_lower.contains("context length")
+            || raw_lower.contains("context exceeded")
+            || raw_lower.contains("maximum context")
+        {
             return ErrorCode::ProviderContextExceeded;
         }
-        if raw_lower.contains("insufficient balance") || raw_lower.contains("quota exceeded") || raw_lower.contains("no credit") {
+        if raw_lower.contains("insufficient balance")
+            || raw_lower.contains("quota exceeded")
+            || raw_lower.contains("no credit")
+        {
             return ErrorCode::ProviderBalanceEmpty;
         }
-        
+
         // 平台适配器类
-        if raw_lower.contains("platformadapter connection failed") || raw_lower.contains("platform connection") {
+        if raw_lower.contains("platformadapter connection failed")
+            || raw_lower.contains("platform connection")
+        {
             return ErrorCode::PlatformConnectionFailed;
         }
         if raw_lower.contains("platform auth") || raw_lower.contains("platform token") {
@@ -255,10 +269,13 @@ impl ErrorTranslator {
         if raw_lower.contains("message too long") || raw_lower.contains("exceeds max length") {
             return ErrorCode::PlatformMessageTooLong;
         }
-        if raw_lower.contains("banned") || raw_lower.contains("blocked") || raw_lower.contains("restricted") {
+        if raw_lower.contains("banned")
+            || raw_lower.contains("blocked")
+            || raw_lower.contains("restricted")
+        {
             return ErrorCode::PlatformBanned;
         }
-        
+
         // 数据库类
         if raw_lower.contains("unique constraint") || raw_lower.contains("duplicate entry") {
             return ErrorCode::DbUniqueConstraint;
@@ -269,7 +286,7 @@ impl ErrorTranslator {
         if raw_lower.contains("sqlx error") && raw_lower.contains("connection") {
             return ErrorCode::DbConnectionFailed;
         }
-        
+
         // 配置类
         if raw_lower.contains("config file not found") || raw_lower.contains("missing config") {
             return ErrorCode::ConfigMissing;
@@ -277,23 +294,30 @@ impl ErrorTranslator {
         if raw_lower.contains("config") && raw_lower.contains("invalid") {
             return ErrorCode::ConfigInvalid;
         }
-        
+
         // 系统类
         if raw_lower.contains("plugin not found") {
             return ErrorCode::PluginNotFound;
         }
-        if raw_lower.contains("plugin") && raw_lower.contains("load") && raw_lower.contains("fail") {
+        if raw_lower.contains("plugin") && raw_lower.contains("load") && raw_lower.contains("fail")
+        {
             return ErrorCode::PluginLoadFailed;
         }
-        if raw_lower.contains("permission denied") || raw_lower.contains("access denied") || raw_lower.contains("forbidden") {
+        if raw_lower.contains("permission denied")
+            || raw_lower.contains("access denied")
+            || raw_lower.contains("forbidden")
+        {
             return ErrorCode::PermissionDenied;
         }
-        
+
         // 通用
-        if raw_lower.contains("network") || raw_lower.contains("dns") || raw_lower.contains("connection refused") {
+        if raw_lower.contains("network")
+            || raw_lower.contains("dns")
+            || raw_lower.contains("connection refused")
+        {
             return ErrorCode::NetworkError;
         }
-        
+
         ErrorCode::Unknown
     }
 
@@ -301,8 +325,12 @@ impl ErrorTranslator {
     fn infer_level(&self, code: &ErrorCode) -> ErrorLevel {
         match code {
             ErrorCode::ConfigMissing | ErrorCode::ConfigInvalid => ErrorLevel::Fatal,
-            ErrorCode::ProviderRateLimit | ErrorCode::PlatformConnectionFailed | ErrorCode::PlatformBanned => ErrorLevel::Warning,
-            ErrorCode::PermissionDenied | ErrorCode::PlatformMessageTooLong | ErrorCode::DbUniqueConstraint => ErrorLevel::Hint,
+            ErrorCode::ProviderRateLimit
+            | ErrorCode::PlatformConnectionFailed
+            | ErrorCode::PlatformBanned => ErrorLevel::Warning,
+            ErrorCode::PermissionDenied
+            | ErrorCode::PlatformMessageTooLong
+            | ErrorCode::DbUniqueConstraint => ErrorLevel::Hint,
             ErrorCode::PluginNotFound | ErrorCode::DbNotFound => ErrorLevel::Hint,
             _ => ErrorLevel::Error,
         }
@@ -323,10 +351,7 @@ impl ErrorTranslator {
                 "⚠️ {}\n   {}\n   👉 {}",
                 humanized.title, humanized.reason, humanized.suggestion
             ),
-            ErrorLevel::Hint => format!(
-                "💡 {}\n   {}",
-                humanized.title, humanized.suggestion
-            ),
+            ErrorLevel::Hint => format!("💡 {}\n   {}", humanized.title, humanized.suggestion),
         }
     }
 
@@ -436,7 +461,7 @@ mod tests {
             ErrorCode::NetworkError,
             ErrorCode::Unknown,
         ];
-        
+
         for code in all_codes {
             assert!(
                 ERROR_TEMPLATES.contains_key(&code),

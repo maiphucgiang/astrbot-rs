@@ -1,8 +1,12 @@
-use astrbot_security::auth::token::{generate_access_token, verify_token, generate_jti, security_headers};
+use astrbot_security::auth::token::{
+    generate_access_token, generate_jti, security_headers, verify_token,
+};
 use astrbot_security::executor::{HardenedLocalExecutor, SafeExecutionResult};
 use astrbot_security::file::upload::SafeFileStorage;
 use astrbot_security::net::ssrf_guard::validate_url;
-use astrbot_security::plugin::capability::{Capability, PluginManifest, RiskLevel, check_install_permission, check_capability};
+use astrbot_security::plugin::capability::{
+    check_capability, check_install_permission, Capability, PluginManifest, RiskLevel,
+};
 use astrbot_security::webhook::security::WebhookSecurity;
 
 /// 端到端安全集成验证
@@ -10,7 +14,10 @@ use astrbot_security::webhook::security::WebhookSecurity;
 async fn test_end_to_end_security_stack() {
     // 1. 硬化代码执行
     let executor = HardenedLocalExecutor::default();
-    let result = executor.execute("print('hello from sandbox')").await.unwrap();
+    let result = executor
+        .execute("print('hello from sandbox')")
+        .await
+        .unwrap();
     assert!(result.stdout.contains("hello from sandbox"));
 
     // 2. 恶意代码被 AST 拦截
@@ -26,14 +33,14 @@ async fn test_end_to_end_security_stack() {
         .as_secs()
         .to_string();
     let nonce = "end2end-nonce-999";
-    
+
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
     type HmacSha256 = Hmac<Sha256>;
     let mut mac = HmacSha256::new_from_slice(secret).unwrap();
     mac.update(payload);
     let sig = hex::encode(mac.finalize().into_bytes());
-    
+
     assert!(WebhookSecurity::verify(secret, payload, &sig, &ts, nonce).is_ok());
     let replay = WebhookSecurity::verify(secret, payload, &sig, &ts, nonce);
     assert!(replay.is_err());
@@ -41,7 +48,9 @@ async fn test_end_to_end_security_stack() {
     // 4. 文件上传安全
     let dir = std::env::temp_dir().join("astrbot_e2e");
     let _ = std::fs::remove_dir_all(&dir);
-    let storage = SafeFileStorage { base_dir: dir.clone() };
+    let storage = SafeFileStorage {
+        base_dir: dir.clone(),
+    };
     let id = storage.save("test.txt", b"safe content").unwrap();
     assert!(!id.is_empty());
     let bad_ext = storage.save("evil.exe", b"payload");

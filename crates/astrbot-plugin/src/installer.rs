@@ -53,16 +53,15 @@ impl PluginInstaller {
         // Read metadata
         let meta_path = target.join("metadata.json");
         let meta: PluginMetadata = if meta_path.exists() {
-            let content = tokio::fs::read_to_string(&meta_path)
-                .await
-                .map_err(|e| AstrBotError::Plugin {
-                    plugin: "installer".to_string(),
-                    message: format!("Failed to read metadata: {}", e),
-                })?;
-            serde_json::from_str(&content).map_err(|e| AstrBotError::Serialization(format!(
-                "Invalid metadata JSON: {}",
-                e
-            )))?
+            let content =
+                tokio::fs::read_to_string(&meta_path)
+                    .await
+                    .map_err(|e| AstrBotError::Plugin {
+                        plugin: "installer".to_string(),
+                        message: format!("Failed to read metadata: {}", e),
+                    })?;
+            serde_json::from_str(&content)
+                .map_err(|e| AstrBotError::Serialization(format!("Invalid metadata JSON: {}", e)))?
         } else {
             PluginMetadata {
                 name: target_name.to_string(),
@@ -87,11 +86,7 @@ impl PluginInstaller {
     }
 
     /// Install a plugin from a Git URL (skeleton — clone not implemented)
-    pub async fn install_from_git(
-        &self,
-        _url: &str,
-        _target_name: &str,
-    ) -> Result<PluginMetadata> {
+    pub async fn install_from_git(&self, _url: &str, _target_name: &str) -> Result<PluginMetadata> {
         warn!("[PluginInstaller] install_from_git is a skeleton — not yet implemented");
         Err(AstrBotError::NotImplemented(
             "Git-based plugin installation is not yet implemented".to_string(),
@@ -121,20 +116,28 @@ impl PluginInstaller {
 
     pub async fn list_installed(&self) -> Result<Vec<String>> {
         let mut plugins = Vec::new();
-        let mut entries = tokio::fs::read_dir(&self.plugin_dir)
+        let mut entries =
+            tokio::fs::read_dir(&self.plugin_dir)
+                .await
+                .map_err(|e| AstrBotError::Plugin {
+                    plugin: "installer".to_string(),
+                    message: format!("Failed to read plugin dir: {}", e),
+                })?;
+
+        while let Some(entry) = entries
+            .next_entry()
             .await
             .map_err(|e| AstrBotError::Plugin {
                 plugin: "installer".to_string(),
-                message: format!("Failed to read plugin dir: {}", e),
-            })?;
-
-        while let Some(entry) = entries.next_entry().await.map_err(|e| {
-            AstrBotError::Plugin {
-                plugin: "installer".to_string(),
                 message: format!("Failed to read dir entry: {}", e),
-            }
-        })? {
-            if entry.file_type().await.unwrap_or_else(|_| unreachable!()).is_dir() {
+            })?
+        {
+            if entry
+                .file_type()
+                .await
+                .unwrap_or_else(|_| unreachable!())
+                .is_dir()
+            {
                 plugins.push(entry.file_name().to_string_lossy().to_string());
             }
         }

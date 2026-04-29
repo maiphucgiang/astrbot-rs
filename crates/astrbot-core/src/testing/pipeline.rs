@@ -4,10 +4,10 @@
 //! fake message → MockPlatformAdapter → MessageHandler →
 //! Provider.chat() → reply → MockPlatformAdapter outgoing queue
 
-use crate::testing::{MockAdapterShared, MockMessageHandler, MockPlatformAdapter, MockProvider};
 use crate::message::{MessageChain, MessageEventResult, MessageHandler};
 use crate::platform::{MessageSource, PlatformType};
 use crate::provider::{ChatConfig, ChatMessage, Provider};
+use crate::testing::{MockAdapterShared, MockMessageHandler, MockPlatformAdapter, MockProvider};
 use std::sync::Arc;
 
 /// A simple message handler that invokes a provider and produces a reply.
@@ -101,25 +101,34 @@ impl MessageHandler for ReplyViaAdapterHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{MockAdapterShared, MockMessageHandler, MockPlatformAdapter, MockProvider};
+    use crate::testing::{
+        MockAdapterShared, MockMessageHandler, MockPlatformAdapter, MockProvider,
+    };
 
     #[tokio::test]
     async fn test_e2e_fake_message_to_provider_reply() {
         // Setup: create mock provider with a canned response
-        let provider = Arc::new(
-            MockProvider::new("mock", "Mock").with_chat_response("Hello from mock LLM!")
-        );
+        let provider =
+            Arc::new(MockProvider::new("mock", "Mock").with_chat_response("Hello from mock LLM!"));
 
         // Setup: create mock adapter
         let (mut adapter, shared) = MockPlatformAdapter::new("mock", "Mock Platform");
-        let adapter = Arc::new(adapter);
 
         // Setup: handler that replies back through the adapter
+        // Note: we wrap in Arc first, then use get_mut to set handler before any clones
+        let mut adapter = Arc::new(adapter);
         let handler = Arc::new(ReplyViaAdapterHandler::new(
             provider.clone(),
             adapter.clone(),
             "You are a helpful test assistant.",
         ));
+
+        // Give the adapter our handler (safe because no other refs yet)
+        if let Some(a) = Arc::get_mut(&mut adapter) {
+            a.set_message_handler(handler);
+        }
+        adapter.initialize().await.unwrap();
+        adapter.start().await.unwrap();
 
         // Give the adapter our handler
         adapter.set_message_handler(handler);
@@ -127,7 +136,10 @@ mod tests {
         adapter.start().await.unwrap();
 
         // Act: inject a fake user message
-        shared.inject_message("user1", "session_abc", "Say hello").await.unwrap();
+        shared
+            .inject_message("user1", "session_abc", "Say hello")
+            .await
+            .unwrap();
 
         // Wait for the async loop to process
         tokio::time::sleep(tokio::time::Duration::from_millis(80)).await;
@@ -135,7 +147,10 @@ mod tests {
         // Assert: the adapter should have an outgoing reply
         let outgoing = adapter.drain_outgoing().await;
         assert_eq!(outgoing.len(), 1, "Should have exactly one outgoing reply");
-        assert_eq!(outgoing[0].0, "session_abc", "Reply should target the correct session");
+        assert_eq!(
+            outgoing[0].0, "session_abc",
+            "Reply should target the correct session"
+        );
         assert_eq!(
             outgoing[0].1.plain_text(),
             "Hello from mock LLM!",
@@ -143,16 +158,19 @@ mod tests {
         );
 
         // Assert: provider was actually called
-        assert_eq!(provider.chat_count(), 1, "Provider should have been called once");
+        assert_eq!(
+            provider.chat_count(),
+            1,
+            "Provider should have been called once"
+        );
 
         adapter.stop().await.unwrap();
     }
 
     #[tokio::test]
     async fn test_e2e_multi_message_conversation() {
-        let provider = Arc::new(
-            MockProvider::new("mock", "Mock").with_chat_response("Acknowledged.")
-        );
+        let provider =
+            Arc::new(MockProvider::new("mock", "Mock").with_chat_response("Acknowledged."));
         let (mut adapter, shared) = MockPlatformAdapter::new("mock", "Mock Platform");
         let adapter = Arc::new(adapter);
 
@@ -174,7 +192,11 @@ mod tests {
 
         let outgoing = adapter.drain_outgoing().await;
         assert_eq!(outgoing.len(), 3, "Should have three replies");
-        assert_eq!(provider.chat_count(), 3, "Provider should have been called three times");
+        assert_eq!(
+            provider.chat_count(),
+            3,
+            "Provider should have been called three times"
+        );
 
         // Verify session routing
         let s1_replies: Vec<_> = outgoing.iter().filter(|(sid, _)| sid == "s1").collect();
@@ -188,9 +210,7 @@ mod tests {
     #[tokio::test]
     async fn test_e2e_provider_failure_fallback() {
         // Provider that always fails
-        let provider = Arc::new(
-            MockProvider::new("mock", "Mock").with_chat_failure()
-        );
+        let provider = Arc::new(MockProvider::new("mock", "Mock").with_chat_failure());
         let (mut adapter, shared) = MockPlatformAdapter::new("mock", "Mock Platform");
         let adapter = Arc::new(adapter);
 
@@ -203,13 +223,19 @@ mod tests {
         adapter.initialize().await.unwrap();
         adapter.start().await.unwrap();
 
-        shared.inject_message("u1", "s1", "trigger failure").await.unwrap();
+        shared
+            .inject_message("u1", "s1", "trigger failure")
+            .await
+            .unwrap();
         tokio::time::sleep(tokio::time::Duration::from_millis(80)).await;
 
         // Even with provider failure, handler should still produce a fallback reply
         let outgoing = adapter.drain_outgoing().await;
         assert_eq!(outgoing.len(), 1);
-        assert_eq!(outgoing[0].1.plain_text(), "Sorry, I couldn't process that.");
+        assert_eq!(
+            outgoing[0].1.plain_text(),
+            "Sorry, I couldn't process that."
+        );
 
         adapter.stop().await.unwrap();
     }

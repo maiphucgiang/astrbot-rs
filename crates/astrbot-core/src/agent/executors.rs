@@ -1,6 +1,6 @@
-use async_trait::async_trait;
 use crate::agent::{AgentContext, AgentExecutor, AgentResult};
 use crate::errors::{AstrBotError, Result};
+use async_trait::async_trait;
 use tracing::{info, warn};
 
 // ---------------------------------------------------------------------------
@@ -58,11 +58,17 @@ impl AgentExecutor for CozeExecutor {
     async fn execute(&self, ctx: &AgentContext) -> Result<AgentResult> {
         if self.is_test_key() {
             return Ok(AgentResult::Text {
-                content: format!("[Coze synthetic] Bot {} received {} messages", self.bot_id, ctx.messages.len()),
+                content: format!(
+                    "[Coze synthetic] Bot {} received {} messages",
+                    self.bot_id,
+                    ctx.messages.len()
+                ),
             });
         }
 
-        let user_msg = ctx.messages.last()
+        let user_msg = ctx
+            .messages
+            .last()
             .map(|m| m.content.clone())
             .unwrap_or_default();
 
@@ -78,7 +84,8 @@ impl AgentExecutor for CozeExecutor {
         });
 
         let url = format!("{}/v3/chat", self.base_url.trim_end_matches('/'));
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
@@ -97,7 +104,8 @@ impl AgentExecutor for CozeExecutor {
         }
 
         // Coze streaming response — extract final answer from event lines
-        let answer = text.lines()
+        let answer = text
+            .lines()
             .filter(|l| l.starts_with("data:"))
             .filter_map(|l| {
                 let json_str = l.trim_start_matches("data:").trim();
@@ -120,7 +128,10 @@ impl AgentExecutor for CozeExecutor {
         if self.is_test_key() {
             return Ok(true);
         }
-        let url = format!("{}/v1/conversation/create", self.base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/v1/conversation/create",
+            self.base_url.trim_end_matches('/')
+        );
         match self.client.get(&url).send().await {
             Ok(resp) => Ok(resp.status().is_success() || resp.status().as_u16() == 401),
             Err(_) => Ok(false),
@@ -203,18 +214,28 @@ impl AgentExecutor for DifyExecutor {
                 _ => DifyMode::Chat,
             };
         }
-        info!("[Dify] Executor initialized for app: {} (mode: {:?})", self.app_id, self.mode);
+        info!(
+            "[Dify] Executor initialized for app: {} (mode: {:?})",
+            self.app_id, self.mode
+        );
         Ok(())
     }
 
     async fn execute(&self, ctx: &AgentContext) -> Result<AgentResult> {
         if self.is_test_key() {
             return Ok(AgentResult::Text {
-                content: format!("[Dify synthetic] App {} received {} messages (mode: {:?})", self.app_id, ctx.messages.len(), self.mode),
+                content: format!(
+                    "[Dify synthetic] App {} received {} messages (mode: {:?})",
+                    self.app_id,
+                    ctx.messages.len(),
+                    self.mode
+                ),
             });
         }
 
-        let query = ctx.messages.last()
+        let query = ctx
+            .messages
+            .last()
             .map(|m| m.content.clone())
             .unwrap_or_default();
 
@@ -240,7 +261,8 @@ impl AgentExecutor for DifyExecutor {
         };
 
         let url = format!("{}{}", self.base_url.trim_end_matches('/'), url_path);
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
@@ -250,7 +272,9 @@ impl AgentExecutor for DifyExecutor {
             .map_err(|e| AstrBotError::Network(format!("Dify request failed: {}", e)))?;
 
         let status = response.status();
-        let json: serde_json::Value = response.json().await
+        let json: serde_json::Value = response
+            .json()
+            .await
             .map_err(|e| AstrBotError::Serialization(format!("Dify response parse: {}", e)))?;
 
         if !status.is_success() {
@@ -260,22 +284,24 @@ impl AgentExecutor for DifyExecutor {
         }
 
         let answer = match self.mode {
-            DifyMode::Chat | DifyMode::Agent => {
-                json.get("answer").and_then(|a| a.as_str()).map(String::from)
-            }
-            DifyMode::Workflow => {
-                json.get("data")
-                    .and_then(|d| d.get("outputs"))
-                    .and_then(|o| o.as_object())
-                    .and_then(|map| map.values().next())
-                    .and_then(|v| v.as_str())
-                    .map(String::from)
-            }
+            DifyMode::Chat | DifyMode::Agent => json
+                .get("answer")
+                .and_then(|a| a.as_str())
+                .map(String::from),
+            DifyMode::Workflow => json
+                .get("data")
+                .and_then(|d| d.get("outputs"))
+                .and_then(|o| o.as_object())
+                .and_then(|map| map.values().next())
+                .and_then(|v| v.as_str())
+                .map(String::from),
         };
 
         Ok(match answer {
             Some(text) => AgentResult::Text { content: text },
-            None => AgentResult::Error { message: "Dify returned empty answer".to_string() },
+            None => AgentResult::Error {
+                message: "Dify returned empty answer".to_string(),
+            },
         })
     }
 
@@ -343,16 +369,23 @@ impl AgentExecutor for DeerFlowExecutor {
     async fn execute(&self, ctx: &AgentContext) -> Result<AgentResult> {
         if self.is_test_key() {
             return Ok(AgentResult::Text {
-                content: format!("[DeerFlow synthetic] Received {} messages", ctx.messages.len()),
+                content: format!(
+                    "[DeerFlow synthetic] Received {} messages",
+                    ctx.messages.len()
+                ),
             });
         }
 
-        let messages: Vec<serde_json::Value> = ctx.messages.iter().map(|m| {
-            serde_json::json!({
-                "role": m.role,
-                "content": m.content,
+        let messages: Vec<serde_json::Value> = ctx
+            .messages
+            .iter()
+            .map(|m| {
+                serde_json::json!({
+                    "role": m.role,
+                    "content": m.content,
+                })
             })
-        }).collect();
+            .collect();
 
         let body = serde_json::json!({
             "messages": messages,
@@ -363,7 +396,8 @@ impl AgentExecutor for DeerFlowExecutor {
         });
 
         let url = format!("{}/v1/execute", self.base_url.trim_end_matches('/'));
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
@@ -373,7 +407,9 @@ impl AgentExecutor for DeerFlowExecutor {
             .map_err(|e| AstrBotError::Network(format!("DeerFlow request failed: {}", e)))?;
 
         let status = response.status();
-        let json: serde_json::Value = response.json().await
+        let json: serde_json::Value = response
+            .json()
+            .await
             .map_err(|e| AstrBotError::Serialization(format!("DeerFlow response parse: {}", e)))?;
 
         if !status.is_success() {
@@ -382,13 +418,22 @@ impl AgentExecutor for DeerFlowExecutor {
             });
         }
 
-        let answer = json.get("result").and_then(|r| r.as_str()).map(String::from)
-            .or_else(|| json.get("output").and_then(|o| o.as_str()).map(String::from))
+        let answer = json
+            .get("result")
+            .and_then(|r| r.as_str())
+            .map(String::from)
+            .or_else(|| {
+                json.get("output")
+                    .and_then(|o| o.as_str())
+                    .map(String::from)
+            })
             .or_else(|| json.get("text").and_then(|t| t.as_str()).map(String::from));
 
         Ok(match answer {
             Some(text) => AgentResult::Text { content: text },
-            None => AgentResult::Error { message: "DeerFlow returned empty result".to_string() },
+            None => AgentResult::Error {
+                message: "DeerFlow returned empty result".to_string(),
+            },
         })
     }
 
@@ -458,11 +503,17 @@ impl AgentExecutor for DashScopeExecutor {
     async fn execute(&self, ctx: &AgentContext) -> Result<AgentResult> {
         if self.is_test_key() {
             return Ok(AgentResult::Text {
-                content: format!("[DashScope synthetic] App {} received {} messages", self.app_id, ctx.messages.len()),
+                content: format!(
+                    "[DashScope synthetic] App {} received {} messages",
+                    self.app_id,
+                    ctx.messages.len()
+                ),
             });
         }
 
-        let prompt = ctx.messages.last()
+        let prompt = ctx
+            .messages
+            .last()
             .map(|m| m.content.clone())
             .unwrap_or_default();
 
@@ -473,8 +524,13 @@ impl AgentExecutor for DashScopeExecutor {
             "parameters": {}
         });
 
-        let url = format!("{}/api/v1/apps/{}/completion", self.base_url.trim_end_matches('/'), self.app_id);
-        let response = self.client
+        let url = format!(
+            "{}/api/v1/apps/{}/completion",
+            self.base_url.trim_end_matches('/'),
+            self.app_id
+        );
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
@@ -484,7 +540,9 @@ impl AgentExecutor for DashScopeExecutor {
             .map_err(|e| AstrBotError::Network(format!("DashScope request failed: {}", e)))?;
 
         let status = response.status();
-        let json: serde_json::Value = response.json().await
+        let json: serde_json::Value = response
+            .json()
+            .await
             .map_err(|e| AstrBotError::Serialization(format!("DashScope response parse: {}", e)))?;
 
         if !status.is_success() {
@@ -493,14 +551,17 @@ impl AgentExecutor for DashScopeExecutor {
             });
         }
 
-        let answer = json.get("output")
+        let answer = json
+            .get("output")
             .and_then(|o| o.get("text"))
             .and_then(|t| t.as_str())
             .map(String::from);
 
         Ok(match answer {
             Some(text) => AgentResult::Text { content: text },
-            None => AgentResult::Error { message: "DashScope returned empty output".to_string() },
+            None => AgentResult::Error {
+                message: "DashScope returned empty output".to_string(),
+            },
         })
     }
 
@@ -551,7 +612,9 @@ mod tests {
         assert_eq!(exe.name(), "bot123");
         assert_eq!(exe.executor_type(), "coze");
 
-        exe.initialize(serde_json::json!({"base_url": "https://custom.coze.com"})).await.unwrap();
+        exe.initialize(serde_json::json!({"base_url": "https://custom.coze.com"}))
+            .await
+            .unwrap();
         let health = exe.health_check().await.unwrap();
         assert!(health);
 
@@ -572,7 +635,9 @@ mod tests {
         assert_eq!(exe.name(), "app456");
         assert_eq!(exe.executor_type(), "dify");
 
-        exe.initialize(serde_json::json!({"mode": "workflow"})).await.unwrap();
+        exe.initialize(serde_json::json!({"mode": "workflow"}))
+            .await
+            .unwrap();
         let health = exe.health_check().await.unwrap();
         assert!(health);
 
@@ -589,8 +654,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_dify_workflow_mode() {
-        let mut exe = DifyExecutor::new("test-key", "app789")
-            .with_mode(DifyMode::Workflow);
+        let mut exe = DifyExecutor::new("test-key", "app789").with_mode(DifyMode::Workflow);
         assert_eq!(exe.mode, DifyMode::Workflow);
 
         exe.initialize(serde_json::json!({})).await.unwrap();

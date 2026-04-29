@@ -1,6 +1,7 @@
 pub mod adapter;
 pub mod dingtalk;
 pub mod discord;
+pub mod framework;
 pub mod kook;
 pub mod lark;
 pub mod line;
@@ -10,9 +11,8 @@ pub mod qq;
 pub mod satori;
 pub mod slack;
 pub mod telegram;
+pub mod webhook;
 pub mod wechat_personal;
 pub mod wecom;
 pub mod wecom_bot;
-pub mod webhook;
 pub mod weixin;
-pub mod framework;

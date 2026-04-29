@@ -1,7 +1,7 @@
+use crate::errors::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::Stream;
-use crate::errors::Result;
 
 // ---------------------------------------------------------------------------
 // TTS Provider trait
@@ -72,19 +72,52 @@ pub struct ChatMessage {
 
 impl ChatMessage {
     pub fn system(content: impl Into<String>) -> Self {
-        Self { role: "system".to_string(), content: content.into(), name: None, tool_calls: None, tool_call_id: None }
+        Self {
+            role: "system".to_string(),
+            content: content.into(),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        }
     }
     pub fn user(content: impl Into<String>) -> Self {
-        Self { role: "user".to_string(), content: content.into(), name: None, tool_calls: None, tool_call_id: None }
+        Self {
+            role: "user".to_string(),
+            content: content.into(),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        }
     }
     pub fn assistant(content: impl Into<String>) -> Self {
-        Self { role: "assistant".to_string(), content: content.into(), name: None, tool_calls: None, tool_call_id: None }
+        Self {
+            role: "assistant".to_string(),
+            content: content.into(),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        }
     }
-    pub fn assistant_with_tools(content: impl Into<String>, tool_calls: Vec<crate::tools::ToolCall>) -> Self {
-        Self { role: "assistant".to_string(), content: content.into(), name: None, tool_calls: Some(tool_calls), tool_call_id: None }
+    pub fn assistant_with_tools(
+        content: impl Into<String>,
+        tool_calls: Vec<crate::tools::ToolCall>,
+    ) -> Self {
+        Self {
+            role: "assistant".to_string(),
+            content: content.into(),
+            name: None,
+            tool_calls: Some(tool_calls),
+            tool_call_id: None,
+        }
     }
     pub fn tool(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
-        Self { role: "tool".to_string(), content: content.into(), name: None, tool_calls: None, tool_call_id: Some(tool_call_id.into()) }
+        Self {
+            role: "tool".to_string(),
+            content: content.into(),
+            name: None,
+            tool_calls: None,
+            tool_call_id: Some(tool_call_id.into()),
+        }
     }
 }
 

@@ -1,7 +1,7 @@
-/// Utility functions for AstrBot
-pub mod time;
 pub mod crypto;
 pub mod file;
+/// Utility functions for AstrBot
+pub mod time;
 
 /// Sanitize a string for use as a filename
 pub fn sanitize_filename(input: &str) -> String {

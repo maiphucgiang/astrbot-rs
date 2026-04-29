@@ -67,7 +67,11 @@ pub fn search_commands(registry: &CommandRegistry, query: &str, limit: usize) ->
         }
 
         // 别名匹配 → 高优先级（优先于前缀匹配）
-        if cmd.aliases.iter().any(|a| a.to_lowercase() == q || a.to_lowercase().starts_with(&q)) {
+        if cmd
+            .aliases
+            .iter()
+            .any(|a| a.to_lowercase() == q || a.to_lowercase().starts_with(&q))
+        {
             results.push(SearchResult {
                 name: cmd.name.clone(),
                 score: 80,
@@ -146,10 +150,7 @@ mod tests {
         // "p" 是 persona 的别名
         let results = search_commands(&registry, "p", 10);
         let persona = results.iter().find(|r| r.name == "persona");
-        assert!(
-            persona.is_some(),
-            "搜索 'p' 应该匹配 persona 的别名"
-        );
+        assert!(persona.is_some(), "搜索 'p' 应该匹配 persona 的别名");
         assert_eq!(persona.unwrap().matched_by, MatchReason::Alias);
     }
 

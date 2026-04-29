@@ -3,10 +3,12 @@
 //! Groq offers ultra-fast LLM inference via an OpenAI-compatible API.
 //! Docs: https://console.groq.com/docs/openai
 
-use async_trait::async_trait;
 use crate::openai::OpenAiProvider;
-use astrbot_core::provider::{Provider, ChatMessage, ChatConfig, ChatResponse, ChatStreamChunk, ModelInfo};
 use astrbot_core::errors::Result;
+use astrbot_core::provider::{
+    ChatConfig, ChatMessage, ChatResponse, ChatStreamChunk, ModelInfo, Provider,
+};
+use async_trait::async_trait;
 use futures_util::Stream;
 
 /// Groq provider wrapper
@@ -41,7 +43,11 @@ impl Provider for GroqProvider {
         self.inner.chat(messages, config).await
     }
 
-    async fn chat_stream(&self, messages: Vec<ChatMessage>, config: ChatConfig) -> Result<Box<dyn Stream<Item = Result<ChatStreamChunk>> + Send>> {
+    async fn chat_stream(
+        &self,
+        messages: Vec<ChatMessage>,
+        config: ChatConfig,
+    ) -> Result<Box<dyn Stream<Item = Result<ChatStreamChunk>> + Send>> {
         self.inner.chat_stream(messages, config).await
     }
 

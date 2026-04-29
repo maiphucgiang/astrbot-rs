@@ -6,7 +6,7 @@ use axum::{
 };
 use std::net::SocketAddr;
 
-use crate::token_bucket::{RateLimiter, RateLimitResult};
+use crate::token_bucket::{RateLimitResult, RateLimiter};
 
 /// Global rate limiter middleware
 /// Returns 429 Too Many Requests with Retry-After header when blocked
@@ -55,10 +55,11 @@ impl ConfigurableRateLimiter {
 
         match self.limiter.check(&ip) {
             RateLimitResult::Allowed => next.run(request).await,
-            RateLimitResult::Blocked { retry_after } => {
-                (StatusCode::TOO_MANY_REQUESTS, [("retry-after", retry_after.to_string())])
-                    .into_response()
-            }
+            RateLimitResult::Blocked { retry_after } => (
+                StatusCode::TOO_MANY_REQUESTS,
+                [("retry-after", retry_after.to_string())],
+            )
+                .into_response(),
         }
     }
 }
@@ -83,6 +84,9 @@ mod tests {
         }
 
         let result = limiter.limiter.check("127.0.0.1");
-        assert!(matches!(result, crate::token_bucket::RateLimitResult::Blocked { .. }));
+        assert!(matches!(
+            result,
+            crate::token_bucket::RateLimitResult::Blocked { .. }
+        ));
     }
 }

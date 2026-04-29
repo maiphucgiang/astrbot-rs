@@ -145,9 +145,13 @@ impl StdioTransport {
             .spawn()
             .map_err(|e| AstrBotError::Internal(format!("Failed to spawn MCP server: {}", e)))?;
 
-        let stdin = child.stdin.take()
+        let stdin = child
+            .stdin
+            .take()
             .ok_or_else(|| AstrBotError::Internal("Failed to get child stdin".to_string()))?;
-        let stdout = child.stdout.take()
+        let stdout = child
+            .stdout
+            .take()
             .ok_or_else(|| AstrBotError::Internal("Failed to get child stdout".to_string()))?;
 
         let reader = BufReader::new(stdout);
@@ -207,7 +211,10 @@ impl StdioTransport {
                             }
                         }
                         Err(e) => {
-                            warn!("MCP stdio reader: failed to parse line: {} | line: {}", e, trimmed);
+                            warn!(
+                                "MCP stdio reader: failed to parse line: {} | line: {}",
+                                e, trimmed
+                            );
                         }
                     }
                 }
@@ -252,7 +259,9 @@ impl McpTransport for StdioTransport {
         // Wait for response with timeout
         match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
             Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(AstrBotError::Network("MCP response channel closed".to_string())),
+            Ok(Err(_)) => Err(AstrBotError::Network(
+                "MCP response channel closed".to_string(),
+            )),
             Err(_) => {
                 // Timeout — clean up pending entry
                 let mut pending = self.shared.pending.write().await;
@@ -310,14 +319,17 @@ impl McpTransport for SseTransport {
     async fn request(&mut self, req: McpRequest) -> Result<McpResponse> {
         let url = format!("{}/rpc", self.base_url);
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(&url)
             .json(&req)
             .send()
             .await
             .map_err(|e| AstrBotError::Network(format!("MCP SSE request: {}", e)))?;
 
-        let mcp_resp: McpResponse = resp.json().await
+        let mcp_resp: McpResponse = resp
+            .json()
+            .await
             .map_err(|e| AstrBotError::Serialization(format!("MCP SSE parse: {}", e)))?;
 
         Ok(mcp_resp)
@@ -326,7 +338,8 @@ impl McpTransport for SseTransport {
     async fn notify(&mut self, req: McpRequest) -> Result<()> {
         let url = format!("{}/rpc", self.base_url);
 
-        let _ = self.client
+        let _ = self
+            .client
             .post(&url)
             .json(&req)
             .send()
@@ -381,9 +394,10 @@ impl McpClient {
         let resp = self.transport.request(req).await?;
         match resp.result_or_error {
             McpResultOrError::Result { result } => Ok(result),
-            McpResultOrError::Error { error } => Err(AstrBotError::Internal(
-                format!("MCP initialize error {}: {}", error.code, error.message)
-            )),
+            McpResultOrError::Error { error } => Err(AstrBotError::Internal(format!(
+                "MCP initialize error {}: {}",
+                error.code, error.message
+            ))),
         }
     }
 
@@ -399,13 +413,15 @@ impl McpClient {
         let resp = self.transport.request(req).await?;
         match resp.result_or_error {
             McpResultOrError::Result { result } => {
-                let parsed: ListToolsResult = serde_json::from_value(result)
-                    .map_err(|e| AstrBotError::Serialization(format!("MCP list_tools parse: {}", e)))?;
+                let parsed: ListToolsResult = serde_json::from_value(result).map_err(|e| {
+                    AstrBotError::Serialization(format!("MCP list_tools parse: {}", e))
+                })?;
                 Ok(parsed.tools)
             }
-            McpResultOrError::Error { error } => Err(AstrBotError::Internal(
-                format!("MCP list_tools error {}: {}", error.code, error.message)
-            )),
+            McpResultOrError::Error { error } => Err(AstrBotError::Internal(format!(
+                "MCP list_tools error {}: {}",
+                error.code, error.message
+            ))),
         }
     }
 
@@ -424,9 +440,10 @@ impl McpClient {
         let resp = self.transport.request(req).await?;
         match resp.result_or_error {
             McpResultOrError::Result { result } => Ok(result),
-            McpResultOrError::Error { error } => Err(AstrBotError::Internal(
-                format!("MCP call_tool error {}: {}", error.code, error.message)
-            )),
+            McpResultOrError::Error { error } => Err(AstrBotError::Internal(format!(
+                "MCP call_tool error {}: {}",
+                error.code, error.message
+            ))),
         }
     }
 
@@ -442,13 +459,15 @@ impl McpClient {
         let resp = self.transport.request(req).await?;
         match resp.result_or_error {
             McpResultOrError::Result { result } => {
-                let parsed: ListResourcesResult = serde_json::from_value(result)
-                    .map_err(|e| AstrBotError::Serialization(format!("MCP list_resources parse: {}", e)))?;
+                let parsed: ListResourcesResult = serde_json::from_value(result).map_err(|e| {
+                    AstrBotError::Serialization(format!("MCP list_resources parse: {}", e))
+                })?;
                 Ok(parsed.resources)
             }
-            McpResultOrError::Error { error } => Err(AstrBotError::Internal(
-                format!("MCP list_resources error {}: {}", error.code, error.message)
-            )),
+            McpResultOrError::Error { error } => Err(AstrBotError::Internal(format!(
+                "MCP list_resources error {}: {}",
+                error.code, error.message
+            ))),
         }
     }
 
@@ -464,13 +483,15 @@ impl McpClient {
         let resp = self.transport.request(req).await?;
         match resp.result_or_error {
             McpResultOrError::Result { result } => {
-                let parsed: ListPromptsResult = serde_json::from_value(result)
-                    .map_err(|e| AstrBotError::Serialization(format!("MCP list_prompts parse: {}", e)))?;
+                let parsed: ListPromptsResult = serde_json::from_value(result).map_err(|e| {
+                    AstrBotError::Serialization(format!("MCP list_prompts parse: {}", e))
+                })?;
                 Ok(parsed.prompts)
             }
-            McpResultOrError::Error { error } => Err(AstrBotError::Internal(
-                format!("MCP list_prompts error {}: {}", error.code, error.message)
-            )),
+            McpResultOrError::Error { error } => Err(AstrBotError::Internal(format!(
+                "MCP list_prompts error {}: {}",
+                error.code, error.message
+            ))),
         }
     }
 
@@ -585,7 +606,8 @@ mod tests {
 
     #[test]
     fn test_mcp_response_parse_error() {
-        let json = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"Invalid request"}}"#;
+        let json =
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"Invalid request"}}"#;
         let resp: McpResponse = serde_json::from_str(json).unwrap();
         match resp.result_or_error {
             McpResultOrError::Error { error } => {

@@ -128,12 +128,18 @@ fn apply_provider_override(config: &mut AstrBotConfig, path: &str, value: &str) 
                     info!("Overridden providers[{}].enabled via env", index);
                 }
                 _ => {
-                    config.providers[index].extra.insert(field.clone(), Value::String(value.to_string()));
+                    config.providers[index]
+                        .extra
+                        .insert(field.clone(), Value::String(value.to_string()));
                     info!("Stored providers[{}].{} in extra via env", index, field);
                 }
             }
         } else {
-            warn!("Provider index {} out of range (max: {})", index, config.providers.len());
+            warn!(
+                "Provider index {} out of range (max: {})",
+                index,
+                config.providers.len()
+            );
         }
     } else {
         warn!("Invalid provider index in path: {}", path);
@@ -150,10 +156,16 @@ fn apply_platform_override(config: &mut AstrBotConfig, path: &str, value: &str) 
     if let Ok(index) = parts[1].parse::<usize>() {
         if index < config.platforms.len() {
             let field = parts[2..].join("_").to_lowercase();
-            config.platforms[index].config.insert(field, Value::String(value.to_string()));
+            config.platforms[index]
+                .config
+                .insert(field, Value::String(value.to_string()));
             info!("Overridden platforms[{}].config via env", index);
         } else {
-            warn!("Platform index {} out of range (max: {})", index, config.platforms.len());
+            warn!(
+                "Platform index {} out of range (max: {})",
+                index,
+                config.platforms.len()
+            );
         }
     }
 }
@@ -172,7 +184,9 @@ mod tests {
     #[test]
     fn test_env_override_nickname() {
         let mut config = AstrBotConfig::default();
-        unsafe { std::env::set_var("ASTRBOT_NICKNAME", "TestBot"); }
+        unsafe {
+            std::env::set_var("ASTRBOT_NICKNAME", "TestBot");
+        }
         apply_env_overrides(&mut config).unwrap();
         assert_eq!(config.nickname, "TestBot");
     }
@@ -180,7 +194,9 @@ mod tests {
     #[test]
     fn test_env_override_admins() {
         let mut config = AstrBotConfig::default();
-        unsafe { std::env::set_var("ASTRBOT_ADMINS", "user1,user2,user3"); }
+        unsafe {
+            std::env::set_var("ASTRBOT_ADMINS", "user1,user2,user3");
+        }
         apply_env_overrides(&mut config).unwrap();
         assert_eq!(config.admins, vec!["user1", "user2", "user3"]);
     }
@@ -188,7 +204,9 @@ mod tests {
     #[test]
     fn test_env_override_webui_port() {
         let mut config = AstrBotConfig::default();
-        unsafe { std::env::set_var("ASTRBOT_WEBUI_PORT", "8080"); }
+        unsafe {
+            std::env::set_var("ASTRBOT_WEBUI_PORT", "8080");
+        }
         apply_env_overrides(&mut config).unwrap();
         assert_eq!(config.webui.port, 8080);
     }

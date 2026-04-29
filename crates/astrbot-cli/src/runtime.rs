@@ -29,7 +29,10 @@ impl BotRuntime {
             model.to_string(),
         );
         self.provider_manager.register(Box::new(provider));
-        info!("[Runtime] Registered OpenAI provider: {} (model: {})", id, model);
+        info!(
+            "[Runtime] Registered OpenAI provider: {} (model: {})",
+            id, model
+        );
     }
 
     /// Graceful shutdown

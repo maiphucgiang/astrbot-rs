@@ -1,5 +1,5 @@
-use async_trait::async_trait;
 use crate::errors::{AstrBotError, Result};
+use async_trait::async_trait;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
@@ -18,7 +18,11 @@ pub struct SseEvent {
 
 impl SseEvent {
     /// Create a new SSE event
-    pub fn new(id: impl Into<String>, event_type: impl Into<String>, data: impl Into<String>) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        event_type: impl Into<String>,
+        data: impl Into<String>,
+    ) -> Self {
         Self {
             id: id.into(),
             event_type: event_type.into(),
@@ -56,7 +60,9 @@ impl SseServer {
 
     /// Broadcast an event to all subscribers
     pub fn broadcast(&self, event: SseEvent) -> Result<usize> {
-        self.tx.send(event).map_err(|e| AstrBotError::Internal(format!("SSE broadcast failed: {}", e)))
+        self.tx
+            .send(event)
+            .map_err(|e| AstrBotError::Internal(format!("SSE broadcast failed: {}", e)))
     }
 
     /// Convenience: broadcast a message event

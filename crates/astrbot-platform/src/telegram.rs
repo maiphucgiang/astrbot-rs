@@ -1,9 +1,12 @@
-use async_trait::async_trait;
-use astrbot_core::errors::{AstrBotError, Result};
-use astrbot_core::message::{AstrBotMessage, MessageChain, MessageComponent, MessageMember, MessageType, HandlerRef, MessageHandler};
-use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
-use astrbot_core::net::SharedHttpClient;
 use crate::adapter::PlatformAdapter;
+use astrbot_core::errors::{AstrBotError, Result};
+use astrbot_core::message::{
+    AstrBotMessage, HandlerRef, MessageChain, MessageComponent, MessageHandler, MessageMember,
+    MessageType,
+};
+use astrbot_core::net::SharedHttpClient;
+use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -242,58 +245,73 @@ fn parse_telegram_message(msg: &TelegramMessage) -> AstrBotMessage {
         let mut entities = msg.entities.clone();
         // Sort by offset so we can iterate in order
         entities.sort_by_key(|e| e.offset);
-        
+
         let mut last_offset: usize = 0;
         let text_len = text.len();
-        
+
         for entity in entities {
             let start = entity.offset as usize;
             let end = (entity.offset + entity.length) as usize;
-            
+
             // Skip out-of-bounds entities
             if start > text_len || end > text_len {
                 continue;
             }
-            
+
             // Add plain text before this entity
             if start > last_offset {
                 let plain = &text[last_offset..start];
                 if !plain.is_empty() {
-                    chain.0.push(MessageComponent::Plain { text: plain.to_string() });
+                    chain.0.push(MessageComponent::Plain {
+                        text: plain.to_string(),
+                    });
                 }
             }
-            
+
             match entity.entity_type.as_str() {
                 "mention" => {
                     let mention_text = &text[start..end];
                     // Remove the leading '@' for target
-                    let target = mention_text.strip_prefix('@').unwrap_or(mention_text).to_string();
-                    chain.0.push(MessageComponent::At { target, display: Some(mention_text.to_string()) });
+                    let target = mention_text
+                        .strip_prefix('@')
+                        .unwrap_or(mention_text)
+                        .to_string();
+                    chain.0.push(MessageComponent::At {
+                        target,
+                        display: Some(mention_text.to_string()),
+                    });
                 }
                 "text_mention" => {
                     let mention_text = &text[start..end];
-                    chain.0.push(MessageComponent::At { target: mention_text.to_string(), display: Some(mention_text.to_string()) });
+                    chain.0.push(MessageComponent::At {
+                        target: mention_text.to_string(),
+                        display: Some(mention_text.to_string()),
+                    });
                 }
                 _ => {
                     // Other entity types: add as plain text
                     let entity_text = &text[start..end];
                     if !entity_text.is_empty() {
-                        chain.0.push(MessageComponent::Plain { text: entity_text.to_string() });
+                        chain.0.push(MessageComponent::Plain {
+                            text: entity_text.to_string(),
+                        });
                     }
                 }
             }
-            
+
             last_offset = end;
         }
-        
+
         // Add remaining plain text after last entity
         if last_offset < text_len {
             let plain = &text[last_offset..];
             if !plain.is_empty() {
-                chain.0.push(MessageComponent::Plain { text: plain.to_string() });
+                chain.0.push(MessageComponent::Plain {
+                    text: plain.to_string(),
+                });
             }
         }
-        
+
         // If no entities at all, add the whole text as plain
         if msg.entities.is_empty() && !text.is_empty() {
             chain.0.push(MessageComponent::Plain { text: text.clone() });
@@ -302,8 +320,7 @@ fn parse_telegram_message(msg: &TelegramMessage) -> AstrBotMessage {
 
     AstrBotMessage {
         message_id: msg.message_id.to_string(),
-        timestamp: chrono::DateTime::from_timestamp(msg.date, 0)
-            .unwrap_or_else(chrono::Utc::now),
+        timestamp: chrono::DateTime::from_timestamp(msg.date, 0).unwrap_or_else(chrono::Utc::now),
         platform: PlatformType::Telegram,
         session_id: msg.chat.id.to_string(),
         sender,
@@ -361,7 +378,12 @@ async fn run_polling_loop(
             format!("{}/getUpdates?limit=100", base_url)
         };
 
-        match client.get(&url).timeout(Duration::from_secs(30)).send().await {
+        match client
+            .get(&url)
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await
+        {
             Ok(response) => {
                 if response.status().is_success() {
                     match response.json::<TelegramUpdatesResponse>().await {
@@ -373,10 +395,8 @@ async fn run_polling_loop(
                                 // Update offset to skip processed updates
                                 offset = Some(update.update_id + 1);
 
-                                let msg = update
-                                    .message
-                                    .as_ref()
-                                    .or(update.edited_message.as_ref());
+                                let msg =
+                                    update.message.as_ref().or(update.edited_message.as_ref());
 
                                 if let Some(ref telegram_msg) = msg {
                                     let astr_msg = parse_telegram_message(telegram_msg);
@@ -431,8 +451,7 @@ impl TelegramAdapter {
     pub fn new(
         bot_token: String,
         api_base: Option<String>,
-        #[allow(dead_code)]
-        webhook_url: Option<String>,
+        #[allow(dead_code)] webhook_url: Option<String>,
     ) -> Self {
         Self {
             metadata: PlatformMetadata {
@@ -679,12 +698,23 @@ impl PlatformAdapter for TelegramAdapter {
         let form = reqwest::multipart::Form::new()
             .text("chat_id", chat_id.clone())
             .part("voice", part);
-        let response = self.http_client.post(&url).multipart(form).send().await
-            .map_err(|e| AstrBotError::Platform { adapter: "Telegram".to_string(), message: format!("HTTP request failed: {}", e) })?;
+        let response = self
+            .http_client
+            .post(&url)
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| AstrBotError::Platform {
+                adapter: "Telegram".to_string(),
+                message: format!("HTTP request failed: {}", e),
+            })?;
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            return Err(AstrBotError::Platform { adapter: "Telegram".to_string(), message: format!("Telegram API error: {} - {}", status, body) });
+            return Err(AstrBotError::Platform {
+                adapter: "Telegram".to_string(),
+                message: format!("Telegram API error: {} - {}", status, body),
+            });
         }
         info!("[Telegram] Voice sent successfully");
         Ok(())

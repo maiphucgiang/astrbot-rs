@@ -1,8 +1,11 @@
-use async_trait::async_trait;
-use astrbot_core::errors::{AstrBotError, Result};
-use astrbot_core::message::{AstrBotMessage, MessageChain, MessageComponent, MessageMember, MessageType, HandlerRef, MessageHandler};
-use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
 use crate::adapter::PlatformAdapter;
+use astrbot_core::errors::{AstrBotError, Result};
+use astrbot_core::message::{
+    AstrBotMessage, HandlerRef, MessageChain, MessageComponent, MessageHandler, MessageMember,
+    MessageType,
+};
+use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
+use async_trait::async_trait;
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -88,7 +91,7 @@ struct SlackAck {
 pub struct SlackAdapter {
     metadata: PlatformMetadata,
     bot_token: String,
-    app_token: String,  // xapp-... token for Socket Mode
+    app_token: String, // xapp-... token for Socket Mode
     http_client: reqwest::Client,
     running: Arc<AtomicBool>,
     ws_task: Option<JoinHandle<()>>,
@@ -117,14 +120,17 @@ impl SlackAdapter {
     }
 
     async fn get_socket_url(&self) -> Result<String> {
-        let resp = self.http_client
+        let resp = self
+            .http_client
             .post("https://slack.com/api/apps.connections.open")
             .header("Authorization", format!("Bearer {}", self.app_token))
             .send()
             .await
             .map_err(|e| AstrBotError::Network(format!("Slack socket URL request: {}", e)))?;
 
-        let data: SlackSocketResponse = resp.json().await
+        let data: SlackSocketResponse = resp
+            .json()
+            .await
             .map_err(|e| AstrBotError::Serialization(format!("Slack socket URL parse: {}", e)))?;
 
         if !data.ok {
@@ -146,7 +152,8 @@ impl SlackAdapter {
             "text": text,
         });
 
-        let resp = self.http_client
+        let resp = self
+            .http_client
             .post("https://slack.com/api/chat.postMessage")
             .header("Authorization", format!("Bearer {}", self.bot_token))
             .json(&body)
@@ -210,32 +217,49 @@ impl PlatformAdapter for SlackAdapter {
                         let (mut write, mut read) = ws_stream.split();
 
                         while running.load(Ordering::SeqCst) {
-                            match tokio::time::timeout(
-                                Duration::from_secs(30),
-                                read.next()
-                            ).await {
+                            match tokio::time::timeout(Duration::from_secs(30), read.next()).await {
                                 Ok(Some(Ok(msg))) => {
-                                    if let tokio_tungstenite::tungstenite::Message::Text(text) = msg {
-                                        if let Ok(envelope) = serde_json::from_str::<SlackEnvelope>(&text) {
+                                    if let tokio_tungstenite::tungstenite::Message::Text(text) = msg
+                                    {
+                                        if let Ok(envelope) =
+                                            serde_json::from_str::<SlackEnvelope>(&text)
+                                        {
                                             // Acknowledge every envelope
                                             let ack = SlackAck {
                                                 envelope_id: envelope.envelope_id.clone(),
                                             };
-                                            let ack_json = serde_json::to_string(&ack).unwrap_or_default();
-                                            let _ = write.send(tokio_tungstenite::tungstenite::Message::Text(ack_json.into())).await;
+                                            let ack_json =
+                                                serde_json::to_string(&ack).unwrap_or_default();
+                                            let _ = write
+                                                .send(
+                                                    tokio_tungstenite::tungstenite::Message::Text(
+                                                        ack_json.into(),
+                                                    ),
+                                                )
+                                                .await;
 
                                             // Process message events
                                             if let Some(payload) = envelope.payload {
                                                 if payload.event_type == "event_callback" {
                                                     if let Some(event) = payload.event {
                                                         if event.event_type == "message" {
-                                                            if let (Some(user), Some(text), Some(channel)) = 
-                                                                (event.user.as_ref(), event.text.as_ref(), Some(event.channel.clone())) {
+                                                            if let (
+                                                                Some(user),
+                                                                Some(text),
+                                                                Some(channel),
+                                                            ) = (
+                                                                event.user.as_ref(),
+                                                                event.text.as_ref(),
+                                                                Some(event.channel.clone()),
+                                                            ) {
                                                                 let platform = PlatformType::Slack;
                                                                 let source = MessageSource {
                                                                     platform,
                                                                     session_id: channel.clone(),
-                                                                    message_id: event.client_msg_id.clone().unwrap_or_default(),
+                                                                    message_id: event
+                                                                        .client_msg_id
+                                                                        .clone()
+                                                                        .unwrap_or_default(),
                                                                     user_id: user.clone(),
                                                                 };
                                                                 let member = MessageMember {
@@ -246,17 +270,31 @@ impl PlatformAdapter for SlackAdapter {
                                                                     is_self: false,
                                                                 };
                                                                 let message = AstrBotMessage {
-                                                                    message_id: event.client_msg_id.clone().unwrap_or_default(),
+                                                                    message_id: event
+                                                                        .client_msg_id
+                                                                        .clone()
+                                                                        .unwrap_or_default(),
                                                                     timestamp: Utc::now(),
                                                                     platform,
                                                                     session_id: channel,
                                                                     sender: member,
-                                                                    message_type: match event.channel_type.as_deref() {
-                                                                        Some("im") => MessageType::Private,
+                                                                    message_type: match event
+                                                                        .channel_type
+                                                                        .as_deref()
+                                                                    {
+                                                                        Some("im") => {
+                                                                            MessageType::Private
+                                                                        }
                                                                         _ => MessageType::Group,
                                                                     },
-                                                                    chain: MessageChain::new().text(text),
-                                                                    raw_payload: Some(serde_json::to_value(&event).unwrap_or_default()),
+                                                                    chain: MessageChain::new()
+                                                                        .text(text),
+                                                                    raw_payload: Some(
+                                                                        serde_json::to_value(
+                                                                            &event,
+                                                                        )
+                                                                        .unwrap_or_default(),
+                                                                    ),
                                                                 };
                                                                 if let Some(ref h) = handler {
                                                                     h.on_message(message).await;
@@ -308,12 +346,14 @@ impl PlatformAdapter for SlackAdapter {
 
     async fn send_message(&self, target: &MessageSource, chain: &MessageChain) -> Result<()> {
         let content = chain.plain_text();
-        self.send_channel_message(&target.session_id, &content).await
+        self.send_channel_message(&target.session_id, &content)
+            .await
     }
 
     async fn reply_message(&self, original: &AstrBotMessage, chain: &MessageChain) -> Result<()> {
         let content = chain.plain_text();
-        self.send_channel_message(&original.session_id, &content).await
+        self.send_channel_message(&original.session_id, &content)
+            .await
     }
 
     async fn health_check(&self) -> Result<bool> {
@@ -330,7 +370,10 @@ impl PlatformAdapter for SlackAdapter {
 
 impl SlackAdapter {
     // Helper for the async task — static method that doesn't need self
-    async fn get_socket_url_with_client(client: &reqwest::Client, app_token: &str) -> Result<String> {
+    async fn get_socket_url_with_client(
+        client: &reqwest::Client,
+        app_token: &str,
+    ) -> Result<String> {
         let resp = client
             .post("https://slack.com/api/apps.connections.open")
             .header("Authorization", format!("Bearer {}", app_token))
@@ -338,7 +381,9 @@ impl SlackAdapter {
             .await
             .map_err(|e| AstrBotError::Network(format!("Slack socket URL request: {}", e)))?;
 
-        let data: SlackSocketResponse = resp.json().await
+        let data: SlackSocketResponse = resp
+            .json()
+            .await
             .map_err(|e| AstrBotError::Serialization(format!("Slack socket URL parse: {}", e)))?;
 
         if !data.ok {
@@ -361,10 +406,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_slack_adapter_new() {
-        let adapter = SlackAdapter::new(
-            "xoxb-test".to_string(),
-            "xapp-test".to_string(),
-        );
+        let adapter = SlackAdapter::new("xoxb-test".to_string(), "xapp-test".to_string());
         assert_eq!(adapter.metadata.name, "Slack");
         assert!(adapter.metadata.enabled);
     }

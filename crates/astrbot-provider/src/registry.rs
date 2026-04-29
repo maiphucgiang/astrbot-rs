@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{ChatProvider, ProviderConfig};
 
 pub struct ProviderRegistry {
-    llm_factories: HashMap<String, Box<dyn Fn(ProviderConfig) -> Box<dyn ChatProvider>> >,
+    llm_factories: HashMap<String, Box<dyn Fn(ProviderConfig) -> Box<dyn ChatProvider>>>,
 }
 
 impl ProviderRegistry {
@@ -31,7 +31,9 @@ impl ProviderRegistry {
             Box::new(crate::sources::siliconflow::create(c.api_key, c.model))
         });
         registry.register("oneapi", |c| {
-            Box::new(crate::sources::oneapi::create(c.base_url, c.api_key, c.model))
+            Box::new(crate::sources::oneapi::create(
+                c.base_url, c.api_key, c.model,
+            ))
         });
         registry.register("lmstudio", |c| {
             Box::new(crate::sources::lmstudio::create(c.base_url, c.model))
@@ -99,14 +101,11 @@ impl ProviderRegistry {
         name: &str,
         factory: impl Fn(ProviderConfig) -> Box<dyn ChatProvider> + 'static,
     ) {
-        self.llm_factories.insert(name.to_string(), Box::new(factory));
+        self.llm_factories
+            .insert(name.to_string(), Box::new(factory));
     }
 
-    pub fn create(
-        &self,
-        name: &str,
-        config: ProviderConfig,
-    ) -> Option<Box<dyn ChatProvider>> {
+    pub fn create(&self, name: &str, config: ProviderConfig) -> Option<Box<dyn ChatProvider>> {
         self.llm_factories.get(name).map(|f| f(config))
     }
 

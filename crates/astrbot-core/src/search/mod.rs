@@ -29,7 +29,11 @@ pub struct SearchResult {
 
 impl SearchResult {
     /// Quick constructor for tests and internal use.
-    pub fn new(title: impl Into<String>, url: impl Into<String>, snippet: impl Into<String>) -> Self {
+    pub fn new(
+        title: impl Into<String>,
+        url: impl Into<String>,
+        snippet: impl Into<String>,
+    ) -> Self {
         Self {
             title: title.into(),
             url: url.into(),
@@ -144,10 +148,7 @@ impl SearchEngine for TavilySearch {
 
         let status = response.status();
         if !status.is_success() {
-            let text = response
-                .text()
-                .await
-                .unwrap_or_default();
+            let text = response.text().await.unwrap_or_default();
             error!("[TavilySearch] HTTP {} — {}", status, text);
             return Err(AstrBotError::Network(format!(
                 "Tavily returned HTTP {}: {}",
@@ -339,7 +340,11 @@ pub fn format_search_context(query: &str, results: &[SearchResult]) -> String {
 // ---------------------------------------------------------------------------
 
 fn extract_domain(url: &str) -> Option<String> {
-    url.split("//").nth(1)?.split('/').next().map(|s| s.to_string())
+    url.split("//")
+        .nth(1)?
+        .split('/')
+        .next()
+        .map(|s| s.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -361,7 +366,11 @@ mod tests {
     #[test]
     fn test_format_search_context() {
         let results = vec![
-            SearchResult::new("Rust Book", "https://doc.rust-lang.org/book/", "The Rust programming language book."),
+            SearchResult::new(
+                "Rust Book",
+                "https://doc.rust-lang.org/book/",
+                "The Rust programming language book.",
+            ),
             SearchResult::new("Crates.io", "https://crates.io/", "Rust package registry."),
         ];
         let ctx = format_search_context("rust tutorial", &results);
@@ -373,8 +382,14 @@ mod tests {
 
     #[test]
     fn test_extract_domain() {
-        assert_eq!(extract_domain("https://api.tavily.com/search"), Some("api.tavily.com".to_string()));
-        assert_eq!(extract_domain("http://example.com/path"), Some("example.com".to_string()));
+        assert_eq!(
+            extract_domain("https://api.tavily.com/search"),
+            Some("api.tavily.com".to_string())
+        );
+        assert_eq!(
+            extract_domain("http://example.com/path"),
+            Some("example.com".to_string())
+        );
         assert_eq!(extract_domain("not-a-url"), None);
     }
 

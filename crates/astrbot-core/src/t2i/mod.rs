@@ -117,7 +117,10 @@ impl T2IRegistry {
     }
 
     /// Get a generator by name
-    pub fn get(&self, name: &str) -> Option<dashmap::mapref::one::Ref<'_, String, Box<dyn ImageGenerator>>> {
+    pub fn get(
+        &self,
+        name: &str,
+    ) -> Option<dashmap::mapref::one::Ref<'_, String, Box<dyn ImageGenerator>>> {
         self.generators.get(name)
     }
 
@@ -207,7 +210,10 @@ impl ImageGenerator for DallEGenerator {
             "size": size,
         });
 
-        let url = format!("{}/v1/images/generations", self.base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/v1/images/generations",
+            self.base_url.trim_end_matches('/')
+        );
         let response = self
             .client
             .post(&url)
@@ -218,10 +224,7 @@ impl ImageGenerator for DallEGenerator {
             .map_err(|e| AstrBotError::Network(format!("DALL-E request failed: {}", e)))?;
 
         if !response.status().is_success() {
-            let text = response
-                .text()
-                .await
-                .unwrap_or_default();
+            let text = response.text().await.unwrap_or_default();
             return Err(AstrBotError::Provider {
                 provider: "dall-e".to_string(),
                 message: format!("OpenAI API error: {}", text),
@@ -332,10 +335,7 @@ impl ImageGenerator for StableDiffusionGenerator {
             .map_err(|e| AstrBotError::Network(format!("SD request failed: {}", e)))?;
 
         if !response.status().is_success() {
-            let text = response
-                .text()
-                .await
-                .unwrap_or_default();
+            let text = response.text().await.unwrap_or_default();
             return Err(AstrBotError::Provider {
                 provider: "stable-diffusion".to_string(),
                 message: format!("SD API error: {}", text),
@@ -435,8 +435,7 @@ mod tests {
         let generator = DallEGenerator::new("sk-abc123");
         assert_eq!(generator.name(), "dall-e");
 
-        let generator2 = DallEGenerator::new("sk-xyz")
-            .with_base_url("https://proxy.example.com");
+        let generator2 = DallEGenerator::new("sk-xyz").with_base_url("https://proxy.example.com");
         assert_eq!(generator2.name(), "dall-e");
     }
 
@@ -445,8 +444,8 @@ mod tests {
         let generator = StableDiffusionGenerator::new("http://127.0.0.1:7860");
         assert_eq!(generator.name(), "stable-diffusion");
 
-        let generator2 = StableDiffusionGenerator::new("http://localhost:7860")
-            .with_defaults(30, 768, 768);
+        let generator2 =
+            StableDiffusionGenerator::new("http://localhost:7860").with_defaults(30, 768, 768);
         assert_eq!(generator2.name(), "stable-diffusion");
     }
 }

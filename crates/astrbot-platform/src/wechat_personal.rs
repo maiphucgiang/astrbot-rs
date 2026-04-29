@@ -1,11 +1,14 @@
-use async_trait::async_trait;
-use astrbot_core::errors::{AstrBotError, Result};
-use astrbot_core::message::{AstrBotMessage, MessageChain, MessageComponent, MessageHandler, HandlerRef, MessageMember, MessageType};
-use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
 use crate::adapter::PlatformAdapter;
-use axum::{routing::post, Router};
+use astrbot_core::errors::{AstrBotError, Result};
+use astrbot_core::message::{
+    AstrBotMessage, HandlerRef, MessageChain, MessageComponent, MessageHandler, MessageMember,
+    MessageType,
+};
+use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
+use async_trait::async_trait;
 use axum::extract::State;
 use axum::http::StatusCode;
+use axum::{routing::post, Router};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -53,11 +56,7 @@ struct WechatShared {
 }
 
 impl WechatShared {
-    async fn send_wechat_message(
-        &self,
-        to: &str,
-        text: &str,
-    ) -> Result<()> {
+    async fn send_wechat_message(&self, to: &str, text: &str) -> Result<()> {
         let url = format!("{}/message/send", self.bridge_endpoint);
 
         let body = WechatSendRequest {
@@ -65,10 +64,7 @@ impl WechatShared {
             content: text.to_string(),
         };
 
-        let mut req = self
-            .http_client
-            .post(&url)
-            .json(&body);
+        let mut req = self.http_client.post(&url).json(&body);
 
         if let Some(ref token) = self.api_token {
             req = req.header("Authorization", format!("Bearer {}", token));
@@ -172,8 +168,14 @@ impl WechatPersonalAdapter {
             enabled: true,
             extra: {
                 let mut map = HashMap::new();
-                map.insert("bridge_endpoint".to_string(), serde_json::Value::String(bridge_endpoint.clone()));
-                map.insert("webhook_port".to_string(), serde_json::Value::Number(webhook_port.into()));
+                map.insert(
+                    "bridge_endpoint".to_string(),
+                    serde_json::Value::String(bridge_endpoint.clone()),
+                );
+                map.insert(
+                    "webhook_port".to_string(),
+                    serde_json::Value::Number(webhook_port.into()),
+                );
                 map
             },
         };
@@ -213,7 +215,8 @@ impl PlatformAdapter for WechatPersonalAdapter {
             .route("/webhook", post(wechat_webhook_handler))
             .with_state(shared);
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
-        let listener = tokio::net::TcpListener::bind(&addr).await
+        let listener = tokio::net::TcpListener::bind(&addr)
+            .await
             .map_err(|e| AstrBotError::Network(format!("WechatPersonal bind failed: {}", e)))?;
         let running = Arc::clone(&self.running);
         let handle = tokio::spawn(async move {
@@ -240,11 +243,7 @@ impl PlatformAdapter for WechatPersonalAdapter {
         Ok(())
     }
 
-    async fn send_message(
-        &self,
-        target: &MessageSource,
-        chain: &MessageChain,
-    ) -> Result<()> {
+    async fn send_message(&self, target: &MessageSource, chain: &MessageChain) -> Result<()> {
         if !self.running.load(Ordering::Relaxed) {
             return Err(AstrBotError::Platform {
                 adapter: "WechatPersonal".to_string(),
@@ -259,11 +258,7 @@ impl PlatformAdapter for WechatPersonalAdapter {
         self.shared.send_wechat_message(to, &text).await
     }
 
-    async fn reply_message(
-        &self,
-        original: &AstrBotMessage,
-        chain: &MessageChain,
-    ) -> Result<()> {
+    async fn reply_message(&self, original: &AstrBotMessage, chain: &MessageChain) -> Result<()> {
         let source = MessageSource {
             platform: PlatformType::WechatPersonal,
             session_id: original.session_id.clone(),
@@ -278,8 +273,9 @@ impl PlatformAdapter for WechatPersonalAdapter {
     }
 
     fn set_message_handler(&mut self, handler: Arc<dyn MessageHandler>) {
-        let shared_mut = Arc::get_mut(&mut self.shared)
-            .expect("set_message_handler must be called before start() when shared has only one owner");
+        let shared_mut = Arc::get_mut(&mut self.shared).expect(
+            "set_message_handler must be called before start() when shared has only one owner",
+        );
         shared_mut.message_handler = Some(handler);
     }
 }
@@ -300,7 +296,10 @@ mod tests {
             None,
             0,
         );
-        assert_eq!(adapter.metadata().platform_type, PlatformType::WechatPersonal);
+        assert_eq!(
+            adapter.metadata().platform_type,
+            PlatformType::WechatPersonal
+        );
         adapter.initialize().await.unwrap();
         adapter.start().await.unwrap();
         assert!(adapter.health_check().await.unwrap());

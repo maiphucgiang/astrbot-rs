@@ -1,10 +1,10 @@
-use std::time::{Duration, Instant};
+use crate::errors::{AstrBotError, Result};
 use async_trait::async_trait;
+use once_cell::sync::Lazy;
+use regex::Regex;
+use std::time::{Duration, Instant};
 use tokio::process::Command;
 use tokio::time::timeout as tokio_timeout;
-use regex::Regex;
-use once_cell::sync::Lazy;
-use crate::errors::{AstrBotError, Result};
 
 /// Result of executing a piece of code.
 #[derive(Debug, Clone, PartialEq)]
@@ -28,7 +28,12 @@ pub trait CodeExecutor: Send + Sync {
     fn name(&self) -> &str;
 
     /// Execute `code` written in `language` with a `timeout_secs` limit.
-    async fn execute(&self, code: &str, language: &str, timeout_secs: u64) -> Result<ExecutionResult>;
+    async fn execute(
+        &self,
+        code: &str,
+        language: &str,
+        timeout_secs: u64,
+    ) -> Result<ExecutionResult>;
 }
 
 /// Sandbox configuration for code execution.
@@ -63,15 +68,15 @@ impl Default for ExecutionSandboxConfig {
                 "sh".to_string(),
             ],
             blocked_commands: vec![
-                r"rm\s+-rf\s+/" .to_string(),
-                r"mkfs\." .to_string(),
+                r"rm\s+-rf\s+/".to_string(),
+                r"mkfs\.".to_string(),
                 r"dd\s+if=/dev/zero".to_string(),
                 r"dd\s+if=/dev/null".to_string(),
                 r"dd\s+if=/dev/random".to_string(),
                 r"dd\s+if=/dev/urandom".to_string(),
-                r":\(\)\s*\{.*\};\s*:\|:\|" .to_string(), // fork bomb :(){ :|:& };:
+                r":\(\)\s*\{.*\};\s*:\|:\|".to_string(), // fork bomb :(){ :|:& };:
                 r"chmod\s+-R\s+777\s+/".to_string(),
-                r">\s*/dev/sda" .to_string(),
+                r">\s*/dev/sda".to_string(),
                 r"mv\s+/.*\s+/dev/null".to_string(),
             ],
             timeout_default: 30,
@@ -123,9 +128,10 @@ impl LocalProcessExecutor {
     fn check_security(&self, code: &str, language: &str) -> Result<()> {
         for pattern in DANGEROUS_COMMAND_PATTERNS.iter() {
             if pattern.is_match(code) {
-                return Err(AstrBotError::Validation(
-                    format!("blocked command pattern: {}", pattern.as_str())
-                ));
+                return Err(AstrBotError::Validation(format!(
+                    "blocked command pattern: {}",
+                    pattern.as_str()
+                )));
             }
         }
 
@@ -133,9 +139,10 @@ impl LocalProcessExecutor {
         if lang_lower == "python" || lang_lower == "python3" || lang_lower == "py" {
             for pattern in DANGEROUS_PYTHON_IMPORTS.iter() {
                 if pattern.is_match(code) {
-                    return Err(AstrBotError::Validation(
-                        format!("dangerous Python import: {}", pattern.as_str())
-                    ));
+                    return Err(AstrBotError::Validation(format!(
+                        "dangerous Python import: {}",
+                        pattern.as_str()
+                    )));
                 }
             }
         }
@@ -150,18 +157,13 @@ impl LocalProcessExecutor {
                 "python3".to_string(),
                 vec!["-c".to_string(), code.to_string()],
             ),
-            "javascript" | "js" | "node" => (
-                "node".to_string(),
-                vec!["-e".to_string(), code.to_string()],
-            ),
-            "bash" | "shell" | "sh" => (
-                "bash".to_string(),
-                vec!["-c".to_string(), code.to_string()],
-            ),
-            other => (
-                other.to_string(),
-                vec!["-c".to_string(), code.to_string()],
-            ),
+            "javascript" | "js" | "node" => {
+                ("node".to_string(), vec!["-e".to_string(), code.to_string()])
+            }
+            "bash" | "shell" | "sh" => {
+                ("bash".to_string(), vec!["-c".to_string(), code.to_string()])
+            }
+            other => (other.to_string(), vec!["-c".to_string(), code.to_string()]),
         }
     }
 }
@@ -172,15 +174,25 @@ impl CodeExecutor for LocalProcessExecutor {
         "local_process"
     }
 
-    async fn execute(&self, code: &str, language: &str, timeout_secs: u64) -> Result<ExecutionResult> {
+    async fn execute(
+        &self,
+        code: &str,
+        language: &str,
+        timeout_secs: u64,
+    ) -> Result<ExecutionResult> {
         // 1. Language validation
         let lang_lower = language.to_lowercase();
         if !self.config.allowed_languages.is_empty()
-            && !self.config.allowed_languages.iter().any(|l| l.to_lowercase() == lang_lower)
+            && !self
+                .config
+                .allowed_languages
+                .iter()
+                .any(|l| l.to_lowercase() == lang_lower)
         {
-            return Err(AstrBotError::Validation(
-                format!("language '{}' is not allowed", language)
-            ));
+            return Err(AstrBotError::Validation(format!(
+                "language '{}' is not allowed",
+                language
+            )));
         }
 
         // 2. Security checks
@@ -231,15 +243,13 @@ impl CodeExecutor for LocalProcessExecutor {
                     duration_ms,
                 })
             }
-            Ok(Err(e)) => {
-                Ok(ExecutionResult {
-                    stdout: String::new(),
-                    stderr: format!("process error: {}", e),
-                    exit_code: None,
-                    success: false,
-                    duration_ms,
-                })
-            }
+            Ok(Err(e)) => Ok(ExecutionResult {
+                stdout: String::new(),
+                stderr: format!("process error: {}", e),
+                exit_code: None,
+                success: false,
+                duration_ms,
+            }),
             Err(_) => {
                 // Timeout — attempt to kill by PID
                 if let Some(pid) = pid {
@@ -335,7 +345,11 @@ mod tests {
             .unwrap();
 
         assert!(!result.success);
-        assert!(result.stderr.contains("timed out"), "stderr was: {}", result.stderr);
+        assert!(
+            result.stderr.contains("timed out"),
+            "stderr was: {}",
+            result.stderr
+        );
         assert!(result.stdout.is_empty());
         assert_eq!(result.exit_code, None);
     }
@@ -343,10 +357,7 @@ mod tests {
     #[tokio::test]
     async fn test_blocked_command_rejection() {
         let exec = python_test_executor();
-        let err = exec
-            .execute("rm -rf /", "python3", 5)
-            .await
-            .unwrap_err();
+        let err = exec.execute("rm -rf /", "python3", 5).await.unwrap_err();
 
         match err {
             AstrBotError::Validation(msg) => {
@@ -375,10 +386,7 @@ mod tests {
     #[tokio::test]
     async fn test_invalid_language_handling() {
         let exec = python_test_executor();
-        let err = exec
-            .execute("echo hello", "rust", 5)
-            .await
-            .unwrap_err();
+        let err = exec.execute("echo hello", "rust", 5).await.unwrap_err();
 
         match err {
             AstrBotError::Validation(msg) => {
@@ -392,10 +400,7 @@ mod tests {
     async fn test_bash_execution_not_allowed_by_default_config() {
         // Default config allows bash, but our test helper only allows python3
         let exec = python_test_executor();
-        let err = exec
-            .execute("echo hello", "bash", 5)
-            .await
-            .unwrap_err();
+        let err = exec.execute("echo hello", "bash", 5).await.unwrap_err();
 
         match err {
             AstrBotError::Validation(msg) => {

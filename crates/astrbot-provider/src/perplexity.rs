@@ -3,10 +3,12 @@
 //! Perplexity provides search-augmented LLM API with real-time citations.
 //! Docs: https://docs.perplexity.ai/guides/getting-started
 
-use async_trait::async_trait;
 use crate::openai::OpenAiProvider;
-use astrbot_core::provider::{Provider, ChatMessage, ChatConfig, ChatResponse, ChatStreamChunk, ModelInfo};
 use astrbot_core::errors::Result;
+use astrbot_core::provider::{
+    ChatConfig, ChatMessage, ChatResponse, ChatStreamChunk, ModelInfo, Provider,
+};
+use async_trait::async_trait;
 use futures_util::Stream;
 
 /// Perplexity AI provider wrapper
@@ -25,10 +27,16 @@ impl PerplexityProvider {
 
 #[async_trait]
 impl Provider for PerplexityProvider {
-    fn id(&self) -> &str { self.inner.id() }
-    fn name(&self) -> &str { self.inner.name() }
+    fn id(&self) -> &str {
+        self.inner.id()
+    }
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
 
-    async fn models(&self) -> Result<Vec<String>> { self.inner.models().await }
+    async fn models(&self) -> Result<Vec<String>> {
+        self.inner.models().await
+    }
 
     async fn chat(&self, messages: Vec<ChatMessage>, config: ChatConfig) -> Result<ChatResponse> {
         self.inner.chat(messages, config).await
@@ -46,9 +54,13 @@ impl Provider for PerplexityProvider {
         self.inner.embedding(texts, model).await
     }
 
-    async fn model_info(&self, model: &str) -> Result<ModelInfo> { self.inner.model_info(model).await }
+    async fn model_info(&self, model: &str) -> Result<ModelInfo> {
+        self.inner.model_info(model).await
+    }
 
-    async fn health_check(&self) -> Result<bool> { self.inner.health_check().await }
+    async fn health_check(&self) -> Result<bool> {
+        self.inner.health_check().await
+    }
 }
 
 #[cfg(test)]

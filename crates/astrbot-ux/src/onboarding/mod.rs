@@ -1,6 +1,6 @@
+use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
 use std::path::Path;
-use serde::{Deserialize, Serialize};
 
 /// 新用户交互式引导流程
 pub struct InteractiveOnboarding {
@@ -107,8 +107,17 @@ impl InteractiveOnboarding {
     /// 第一步：交互式选择主要平台
     fn prompt_platform(&self) -> anyhow::Result<String> {
         let platforms = vec![
-            "QQ", "Telegram", "Discord", "飞书", "钉钉", "微信",
-            "Slack", "Kook", "Line", "Satori", "公众号",
+            "QQ",
+            "Telegram",
+            "Discord",
+            "飞书",
+            "钉钉",
+            "微信",
+            "Slack",
+            "Kook",
+            "Line",
+            "Satori",
+            "公众号",
         ];
 
         println!("📡 第一步：选择你的主要平台");
@@ -133,9 +142,7 @@ impl InteractiveOnboarding {
 
     /// 第二步：交互式选择 Provider + 输入 API Key
     fn prompt_provider(&self) -> anyhow::Result<(String, String)> {
-        let providers = vec![
-            "OpenAI", "DeepSeek", "硅基流动", "Gemini", "Ollama", "其他",
-        ];
+        let providers = vec!["OpenAI", "DeepSeek", "硅基流动", "Gemini", "Ollama", "其他"];
 
         println!("🤖 第二步：接入 LLM Provider");
         println!("───────────────────────────────");
@@ -198,10 +205,7 @@ impl InteractiveOnboarding {
                 ),
                 None,
             ),
-            "Ollama" => (
-                "http://localhost:11434/api/tags".to_string(),
-                None,
-            ),
+            "Ollama" => ("http://localhost:11434/api/tags".to_string(), None),
             _ => {
                 println!("⚠ 未知 Provider，跳过自动验证");
                 return Ok(());
@@ -209,7 +213,15 @@ impl InteractiveOnboarding {
         };
 
         let mut cmd = std::process::Command::new("curl");
-        cmd.args(&["-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10"]);
+        cmd.args(&[
+            "-s",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            "--max-time",
+            "10",
+        ]);
 
         if let Some(header) = auth_header {
             cmd.arg("-H").arg(header);
@@ -225,12 +237,10 @@ impl InteractiveOnboarding {
                         println!("✓ API Key 有效\n");
                         Ok(())
                     }
-                    "401" => anyhow::bail!(
-                        "API Key 无效或已过期（401 未授权）。请检查 Key 是否正确。"
-                    ),
-                    "429" => anyhow::bail!(
-                        "请求过于频繁（429），Provider 限流中。请稍后重试。"
-                    ),
+                    "401" => {
+                        anyhow::bail!("API Key 无效或已过期（401 未授权）。请检查 Key 是否正确。")
+                    }
+                    "429" => anyhow::bail!("请求过于频繁（429），Provider 限流中。请稍后重试。"),
                     _ => anyhow::bail!(
                         "验证失败，HTTP 状态码: {}。可能是网络问题或 Key 无效。",
                         code
@@ -407,9 +417,8 @@ mod tests {
         flow.save_config(&config).unwrap();
         assert!(Path::new(&path).exists());
 
-        let loaded: OnboardingConfig = serde_json::from_str(
-            &std::fs::read_to_string(&path).unwrap()
-        ).unwrap();
+        let loaded: OnboardingConfig =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(loaded.platform, "Telegram");
         assert_eq!(loaded.provider, "DeepSeek");
 

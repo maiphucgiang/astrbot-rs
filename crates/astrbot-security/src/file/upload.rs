@@ -13,7 +13,11 @@ pub struct SafeFileStorage {
 impl SafeFileStorage {
     pub fn save(&self, original_name: &str, bytes: &[u8]) -> Result<String> {
         if bytes.len() > MAX_FILE_SIZE {
-            bail!("File too large: {} bytes (max {})", bytes.len(), MAX_FILE_SIZE);
+            bail!(
+                "File too large: {} bytes (max {})",
+                bytes.len(),
+                MAX_FILE_SIZE
+            );
         }
 
         let ext = Path::new(original_name)
@@ -30,7 +34,11 @@ impl SafeFileStorage {
         if let Some(kind) = infer::get(bytes) {
             let real_ext = kind.extension();
             if real_ext != ext && !is_extension_alias(&ext, real_ext) {
-                bail!("File type mismatch: claimed .{} but detected .{}", ext, real_ext);
+                bail!(
+                    "File type mismatch: claimed .{} but detected .{}",
+                    ext,
+                    real_ext
+                );
             }
         }
 
@@ -80,7 +88,9 @@ mod tests {
     fn test_save_txt() {
         let dir = std::env::temp_dir().join("astrbot_test_files");
         let _ = std::fs::remove_dir_all(&dir);
-        let storage = SafeFileStorage { base_dir: dir.clone() };
+        let storage = SafeFileStorage {
+            base_dir: dir.clone(),
+        };
         let id = storage.save("test.txt", b"hello world").unwrap();
         assert!(!id.is_empty());
     }

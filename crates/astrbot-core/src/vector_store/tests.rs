@@ -18,14 +18,20 @@ async fn test_memory_vector_store_crud() {
         .unwrap();
 
     // Search
-    let results = store.search(collection, vec![1.0, 0.0, 0.0], 1).await.unwrap();
+    let results = store
+        .search(collection, vec![1.0, 0.0, 0.0], 1)
+        .await
+        .unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].id, "doc1");
     assert!(results[0].score > 0.99);
 
     // Delete
     store.delete(collection, "doc1").await.unwrap();
-    let results = store.search(collection, vec![1.0, 0.0, 0.0], 1).await.unwrap();
+    let results = store
+        .search(collection, vec![1.0, 0.0, 0.0], 1)
+        .await
+        .unwrap();
     assert!(results.is_empty());
 }
 
@@ -48,13 +54,19 @@ async fn test_memory_vector_store_cosine_search() {
         .unwrap();
 
     // Query matches "a" best
-    let results = store.search(collection, vec![1.0, 0.0, 0.0], 2).await.unwrap();
+    let results = store
+        .search(collection, vec![1.0, 0.0, 0.0], 2)
+        .await
+        .unwrap();
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].id, "a");
     assert!(results[0].score > results[1].score);
 
     // Query matches "c" best (equal components)
-    let results = store.search(collection, vec![1.0, 1.0, 0.0], 1).await.unwrap();
+    let results = store
+        .search(collection, vec![1.0, 1.0, 0.0], 1)
+        .await
+        .unwrap();
     assert_eq!(results[0].id, "c");
 }
 
@@ -126,12 +138,27 @@ async fn test_search_result_ordering() {
     let collection = "ordering_test";
 
     // Insert vectors with varying similarity to query [1,0,0]
-    store.upsert(collection, "far", vec![0.0, 1.0, 0.0], None).await.unwrap();
-    store.upsert(collection, "close", vec![0.9, 0.1, 0.0], None).await.unwrap();
-    store.upsert(collection, "exact", vec![1.0, 0.0, 0.0], None).await.unwrap();
-    store.upsert(collection, "mid", vec![0.5, 0.5, 0.0], None).await.unwrap();
+    store
+        .upsert(collection, "far", vec![0.0, 1.0, 0.0], None)
+        .await
+        .unwrap();
+    store
+        .upsert(collection, "close", vec![0.9, 0.1, 0.0], None)
+        .await
+        .unwrap();
+    store
+        .upsert(collection, "exact", vec![1.0, 0.0, 0.0], None)
+        .await
+        .unwrap();
+    store
+        .upsert(collection, "mid", vec![0.5, 0.5, 0.0], None)
+        .await
+        .unwrap();
 
-    let results = store.search(collection, vec![1.0, 0.0, 0.0], 4).await.unwrap();
+    let results = store
+        .search(collection, vec![1.0, 0.0, 0.0], 4)
+        .await
+        .unwrap();
     assert_eq!(results.len(), 4);
 
     // Must be sorted descending by score
@@ -150,8 +177,14 @@ async fn test_search_result_ordering() {
 #[tokio::test]
 async fn test_memory_vector_store_list_collections() {
     let store = MemoryVectorStore::new();
-    store.upsert("coll_a", "id1", vec![1.0], None).await.unwrap();
-    store.upsert("coll_b", "id2", vec![1.0], None).await.unwrap();
+    store
+        .upsert("coll_a", "id1", vec![1.0], None)
+        .await
+        .unwrap();
+    store
+        .upsert("coll_b", "id2", vec![1.0], None)
+        .await
+        .unwrap();
 
     let collections = store.list_collections().await.unwrap();
     assert!(collections.contains(&"coll_a".to_string()));
@@ -177,8 +210,5 @@ async fn test_memory_vector_store_upsert_overwrite() {
     assert_eq!(results[0].id, "same_id");
     // Score should be ~1.0 against [0,1]
     assert!(results[0].score > 0.99);
-    assert_eq!(
-        results[0].metadata.as_ref().unwrap()["v"],
-        2
-    );
+    assert_eq!(results[0].metadata.as_ref().unwrap()["v"], 2);
 }

@@ -17,7 +17,7 @@ use tracing::{error, info, warn};
 pub struct ToolParameter {
     pub name: String,
     pub description: String,
-    pub param_type: String,  // "string", "number", "boolean", "array", "object"
+    pub param_type: String, // "string", "number", "boolean", "array", "object"
     pub required: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<Value>,
@@ -46,9 +46,15 @@ impl ToolDefinition {
         for param in &self.parameters {
             let mut prop = serde_json::Map::new();
             prop.insert("type".to_string(), Value::String(param.param_type.clone()));
-            prop.insert("description".to_string(), Value::String(param.description.clone()));
+            prop.insert(
+                "description".to_string(),
+                Value::String(param.description.clone()),
+            );
             if let Some(vals) = &param.enum_values {
-                prop.insert("enum".to_string(), Value::Array(vals.iter().map(|v| Value::String(v.clone())).collect()));
+                prop.insert(
+                    "enum".to_string(),
+                    Value::Array(vals.iter().map(|v| Value::String(v.clone())).collect()),
+                );
             }
             properties.insert(param.name.clone(), Value::Object(prop));
 
@@ -152,13 +158,10 @@ impl ToolRegistry {
     }
 
     /// Execute a tool by name
-    pub async fn execute(
-        &self,
-        name: &str,
-        arguments: &Value,
-    ) -> Result<ToolResult> {
+    pub async fn execute(&self, name: &str, arguments: &Value) -> Result<ToolResult> {
         let tools = self.tools.read().await;
-        let tool = tools.get(name)
+        let tool = tools
+            .get(name)
             .ok_or_else(|| AstrBotError::NotFound(format!("tool: {}", name)))?;
 
         if tool.needs_confirmation(arguments) {
@@ -203,16 +206,14 @@ impl EchoTool {
             definition: ToolDefinition {
                 name: "echo".to_string(),
                 description: "Echo back the input text".to_string(),
-                parameters: vec![
-                    ToolParameter {
-                        name: "text".to_string(),
-                        description: "Text to echo".to_string(),
-                        param_type: "string".to_string(),
-                        required: true,
-                        default: None,
-                        enum_values: None,
-                    },
-                ],
+                parameters: vec![ToolParameter {
+                    name: "text".to_string(),
+                    description: "Text to echo".to_string(),
+                    param_type: "string".to_string(),
+                    required: true,
+                    default: None,
+                    enum_values: None,
+                }],
                 returns: Some("string".to_string()),
                 requires_confirmation: false,
             },
@@ -227,7 +228,8 @@ impl Tool for EchoTool {
     }
 
     async fn execute(&self, arguments: &Value) -> Result<ToolResult> {
-        let text = arguments.get("text")
+        let text = arguments
+            .get("text")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
@@ -284,8 +286,11 @@ pub fn parse_openai_tool_calls(content: &str) -> Vec<ToolCall> {
             if let Some(obj) = item.as_object() {
                 if let (Some(id), Some(name), Some(args)) = (
                     obj.get("id").and_then(|v| v.as_str()),
-                    obj.get("name").or_else(|| obj.get("function").and_then(|f| f.get("name"))).and_then(|v| v.as_str()),
-                    obj.get("arguments").or_else(|| obj.get("function").and_then(|f| f.get("arguments"))),
+                    obj.get("name")
+                        .or_else(|| obj.get("function").and_then(|f| f.get("name")))
+                        .and_then(|v| v.as_str()),
+                    obj.get("arguments")
+                        .or_else(|| obj.get("function").and_then(|f| f.get("arguments"))),
                 ) {
                     calls.push(ToolCall {
                         id: id.to_string(),
@@ -342,7 +347,10 @@ mod tests {
         assert_eq!(defs.len(), 1);
         assert_eq!(defs[0].name, "echo");
 
-        let result = registry.execute("echo", &serde_json::json!({"text": "hello"})).await.unwrap();
+        let result = registry
+            .execute("echo", &serde_json::json!({"text": "hello"}))
+            .await
+            .unwrap();
         match result {
             ToolResult::Success { output } => {
                 assert_eq!(output, Value::String("hello".to_string()));
@@ -363,16 +371,14 @@ mod tests {
         let def = ToolDefinition {
             name: "test".to_string(),
             description: "A test tool".to_string(),
-            parameters: vec![
-                ToolParameter {
-                    name: "arg1".to_string(),
-                    description: "First arg".to_string(),
-                    param_type: "string".to_string(),
-                    required: true,
-                    default: None,
-                    enum_values: Some(vec!["a".to_string(), "b".to_string()]),
-                },
-            ],
+            parameters: vec![ToolParameter {
+                name: "arg1".to_string(),
+                description: "First arg".to_string(),
+                param_type: "string".to_string(),
+                required: true,
+                default: None,
+                enum_values: Some(vec!["a".to_string(), "b".to_string()]),
+            }],
             returns: None,
             requires_confirmation: false,
         };

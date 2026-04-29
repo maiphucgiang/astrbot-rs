@@ -171,7 +171,10 @@ mod tests {
         for _ in 0..100 {
             limiter.check(key);
         }
-        assert!(matches!(limiter.check(key), RateLimitResult::Blocked { .. }));
+        assert!(matches!(
+            limiter.check(key),
+            RateLimitResult::Blocked { .. }
+        ));
 
         limiter.reset(key);
         assert_eq!(limiter.check(key), RateLimitResult::Allowed);

@@ -1,11 +1,14 @@
+use crate::adapter::PlatformAdapter;
+use astrbot_core::errors::{AstrBotError, Result};
+use astrbot_core::message::{
+    AstrBotMessage, HandlerRef, MessageChain, MessageComponent, MessageHandler, MessageMember,
+    MessageType,
+};
+use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
 use async_trait::async_trait;
-use axum::{routing::post, Router};
 use axum::extract::State;
 use axum::http::StatusCode;
-use astrbot_core::errors::{AstrBotError, Result};
-use astrbot_core::message::{AstrBotMessage, MessageChain, MessageComponent, MessageMember, MessageType, HandlerRef, MessageHandler};
-use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
-use crate::adapter::PlatformAdapter;
+use axum::{routing::post, Router};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -136,30 +139,39 @@ impl LarkShared {
             app_secret: self.app_secret.clone(),
         };
 
-        let resp = self.http_client
+        let resp = self
+            .http_client
             .post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal")
             .json(&body)
             .send()
             .await
             .map_err(|e| AstrBotError::Network(format!("Lark token request failed: {}", e)))?;
 
-        let data: LarkTenantAccessTokenResponse = resp.json().await
+        let data: LarkTenantAccessTokenResponse = resp
+            .json()
+            .await
             .map_err(|e| AstrBotError::Serialization(format!("Lark token parse failed: {}", e)))?;
 
         if data.code != 0 {
             return Err(AstrBotError::Platform {
                 adapter: "lark".to_string(),
-                message: format!("Lark token error {}: {}", data.code, data.msg.unwrap_or_default()),
+                message: format!(
+                    "Lark token error {}: {}",
+                    data.code,
+                    data.msg.unwrap_or_default()
+                ),
             });
         }
 
-        let token = data.tenant_access_token
+        let token = data
+            .tenant_access_token
             .ok_or_else(|| AstrBotError::Platform {
                 adapter: "lark".to_string(),
                 message: "No tenant_access_token in response".to_string(),
             })?;
 
-        let expire_at = chrono::Utc::now().timestamp_millis() + (data.expire.unwrap_or(7200) * 1000);
+        let expire_at =
+            chrono::Utc::now().timestamp_millis() + (data.expire.unwrap_or(7200) * 1000);
 
         {
             let mut cache = self.token_cache.write().await;
@@ -178,7 +190,8 @@ impl LarkShared {
             content: serde_json::json!({"text": content}).to_string(),
         };
 
-        let resp = self.http_client
+        let resp = self
+            .http_client
             .post("https://open.feishu.cn/open-apis/im/v1/messages")
             .header("Authorization", format!("Bearer {}", token))
             .json(&body)
@@ -245,7 +258,9 @@ impl LarkShared {
                                 sender: member,
                                 message_type,
                                 chain,
-                                raw_payload: Some(serde_json::to_value(&msg_event).unwrap_or_default()),
+                                raw_payload: Some(
+                                    serde_json::to_value(&msg_event).unwrap_or_default(),
+                                ),
                             };
                             if let Some(ref h) = self.message_handler {
                                 h.on_message(message).await;
@@ -324,7 +339,8 @@ impl PlatformAdapter for LarkAdapter {
             .with_state(shared);
 
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
-        let listener = tokio::net::TcpListener::bind(&addr).await
+        let listener = tokio::net::TcpListener::bind(&addr)
+            .await
             .map_err(|e| AstrBotError::Network(format!("Lark bind failed: {}", e)))?;
 
         let task = tokio::spawn(async move {
@@ -351,12 +367,16 @@ impl PlatformAdapter for LarkAdapter {
 
     async fn send_message(&self, target: &MessageSource, chain: &MessageChain) -> Result<()> {
         let content = chain.plain_text();
-        self.shared.send_lark_message(&target.session_id, &content).await
+        self.shared
+            .send_lark_message(&target.session_id, &content)
+            .await
     }
 
     async fn reply_message(&self, original: &AstrBotMessage, chain: &MessageChain) -> Result<()> {
         let content = chain.plain_text();
-        self.shared.send_lark_message(&original.session_id, &content).await
+        self.shared
+            .send_lark_message(&original.session_id, &content)
+            .await
     }
 
     async fn health_check(&self) -> Result<bool> {
@@ -369,8 +389,9 @@ impl PlatformAdapter for LarkAdapter {
     fn set_message_handler(&mut self, handler: Arc<dyn MessageHandler>) {
         // Need to update the shared state — use unsafe for now, or restructure
         // SAFETY: This is called before start(), so no concurrent access
-        let shared_mut = Arc::get_mut(&mut self.shared)
-            .expect("set_message_handler must be called before start() when shared has only one owner");
+        let shared_mut = Arc::get_mut(&mut self.shared).expect(
+            "set_message_handler must be called before start() when shared has only one owner",
+        );
         shared_mut.message_handler = Some(handler);
     }
 
@@ -388,31 +409,60 @@ impl PlatformAdapter for LarkAdapter {
             .text("parent_type", "im_msg")
             .text("parent_node", target.session_id.clone())
             .part("file", part);
-        let resp = self.shared.http_client.post(upload_url)
+        let resp = self
+            .shared
+            .http_client
+            .post(upload_url)
             .header("Authorization", format!("Bearer {}", token))
-            .multipart(form).send().await
+            .multipart(form)
+            .send()
+            .await
             .map_err(|e| AstrBotError::Network(format!("Lark file upload failed: {}", e)))?;
         if !resp.status().is_success() {
-            let status = resp.status(); let text = resp.text().await.unwrap_or_default();
-            return Err(AstrBotError::Platform { adapter: "lark".to_string(), message: format!("Lark file upload error: {} - {}", status, text) });
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(AstrBotError::Platform {
+                adapter: "lark".to_string(),
+                message: format!("Lark file upload error: {} - {}", status, text),
+            });
         }
-        let resp_json: serde_json::Value = resp.json().await
-            .map_err(|e| AstrBotError::Platform { adapter: "lark".to_string(), message: format!("Failed to parse upload response: {}", e) })?;
-        let file_key = resp_json.get("data").and_then(|d| d.get("file_key")).and_then(|v| v.as_str())
-            .ok_or_else(|| AstrBotError::Platform { adapter: "lark".to_string(), message: "No file_key in Lark upload response".to_string() })?;
+        let resp_json: serde_json::Value =
+            resp.json().await.map_err(|e| AstrBotError::Platform {
+                adapter: "lark".to_string(),
+                message: format!("Failed to parse upload response: {}", e),
+            })?;
+        let file_key = resp_json
+            .get("data")
+            .and_then(|d| d.get("file_key"))
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| AstrBotError::Platform {
+                adapter: "lark".to_string(),
+                message: "No file_key in Lark upload response".to_string(),
+            })?;
         let body = LarkSendMessageRequest {
-            receive_id: target.session_id.clone(), msg_type: "audio".to_string(),
+            receive_id: target.session_id.clone(),
+            msg_type: "audio".to_string(),
             content: serde_json::json!({"file_key": file_key}).to_string(),
         };
-        let send_resp = self.shared.http_client.post("https://open.feishu.cn/open-apis/im/v1/messages")
+        let send_resp = self
+            .shared
+            .http_client
+            .post("https://open.feishu.cn/open-apis/im/v1/messages")
             .header("Authorization", format!("Bearer {}", token))
-            .json(&body).send().await
+            .json(&body)
+            .send()
+            .await
             .map_err(|e| AstrBotError::Network(format!("Lark send audio failed: {}", e)))?;
         if !send_resp.status().is_success() {
-            let status = send_resp.status(); let text = send_resp.text().await.unwrap_or_default();
-            return Err(AstrBotError::Platform { adapter: "lark".to_string(), message: format!("Lark send audio error: {} - {}", status, text) });
+            let status = send_resp.status();
+            let text = send_resp.text().await.unwrap_or_default();
+            return Err(AstrBotError::Platform {
+                adapter: "lark".to_string(),
+                message: format!("Lark send audio error: {} - {}", status, text),
+            });
         }
-        info!("[Lark] Voice sent successfully"); Ok(())
+        info!("[Lark] Voice sent successfully");
+        Ok(())
     }
 }
 
@@ -428,7 +478,10 @@ async fn lark_callback_handler(
         Ok(response) => (StatusCode::OK, axum::Json(response)),
         Err(e) => {
             error!("Lark callback error: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(serde_json::json!({"code": -1, "msg": e.to_string()})))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(serde_json::json!({"code": -1, "msg": e.to_string()})),
+            )
         }
     }
 }
@@ -451,11 +504,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_lark_adapter_new() {
-        let adapter = LarkAdapter::new(
-            "test_app_id".to_string(),
-            "test_secret".to_string(),
-            8888,
-        );
+        let adapter = LarkAdapter::new("test_app_id".to_string(), "test_secret".to_string(), 8888);
         assert_eq!(adapter.metadata.name, "Lark / Feishu");
         assert!(adapter.metadata.enabled);
     }

@@ -69,7 +69,10 @@ impl PluginManifest {
 }
 
 /// 安装权限检查
-pub fn check_install_permission(manifest: &PluginManifest, developer_mode: bool) -> Result<(), String> {
+pub fn check_install_permission(
+    manifest: &PluginManifest,
+    developer_mode: bool,
+) -> Result<(), String> {
     let risk = manifest.risk_level();
     if risk == RiskLevel::Critical && !developer_mode {
         return Err(format!(
@@ -81,10 +84,7 @@ pub fn check_install_permission(manifest: &PluginManifest, developer_mode: bool)
 }
 
 /// 校验插件能力是否允许某操作
-pub fn check_capability(
-    manifest: &PluginManifest,
-    required: &Capability,
-) -> Result<(), String> {
+pub fn check_capability(manifest: &PluginManifest, required: &Capability) -> Result<(), String> {
     let has = manifest.capabilities.iter().any(|c| match (c, required) {
         (Capability::ReadMessages, Capability::ReadMessages) => true,
         (Capability::SendMessages, Capability::SendMessages) => true,

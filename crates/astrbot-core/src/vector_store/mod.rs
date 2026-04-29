@@ -158,7 +158,9 @@ impl PgVectorStore {
         sqlx::query("CREATE EXTENSION IF NOT EXISTS pgvector")
             .execute(&self.pool)
             .await
-            .map_err(|e| AstrBotError::Internal(format!("pgvector extension check failed: {}", e)))?;
+            .map_err(|e| {
+                AstrBotError::Internal(format!("pgvector extension check failed: {}", e))
+            })?;
 
         let table_name = Self::sanitize_name(collection);
         let sql = format!(
@@ -249,9 +251,12 @@ impl VectorStore for PgVectorStore {
         for (id, emb_json, meta_json) in rows {
             let embedding = Self::embedding_from_json(&emb_json)?;
             let score = MemoryVectorStore::cosine_similarity(&query, &embedding);
-            let metadata = meta_json
-                .and_then(|s| serde_json::from_str(&s).ok());
-            scored.push(SearchResult { id, score, metadata });
+            let metadata = meta_json.and_then(|s| serde_json::from_str(&s).ok());
+            scored.push(SearchResult {
+                id,
+                score,
+                metadata,
+            });
         }
 
         scored.sort_by(|a, b| {
@@ -278,7 +283,7 @@ impl VectorStore for PgVectorStore {
 
     async fn list_collections(&self) -> Result<Vec<String>> {
         let rows = sqlx::query_as::<_, (String,)>(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
         )
         .fetch_all(&self.pool)
         .await
@@ -333,9 +338,10 @@ impl MilvusStore {
             req = req.bearer_auth(token);
         }
 
-        let resp = req.send().await.map_err(|e| {
-            AstrBotError::Internal(format!("Milvus HTTP request failed: {}", e))
-        })?;
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| AstrBotError::Internal(format!("Milvus HTTP request failed: {}", e)))?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -346,9 +352,10 @@ impl MilvusStore {
             )));
         }
 
-        let result = resp.json::<R>().await.map_err(|e| {
-            AstrBotError::Internal(format!("Milvus JSON parse error: {}", e))
-        })?;
+        let result = resp
+            .json::<R>()
+            .await
+            .map_err(|e| AstrBotError::Internal(format!("Milvus JSON parse error: {}", e)))?;
         Ok(result)
     }
 }
@@ -391,9 +398,10 @@ impl VectorStore for MilvusStore {
     ) -> Result<()> {
         let mut data = serde_json::Map::new();
         data.insert("id".to_string(), Value::String(id.to_string()));
-        data.insert("vector".to_string(), Value::Array(
-            vector.into_iter().map(|v| Value::from(v)).collect()
-        ));
+        data.insert(
+            "vector".to_string(),
+            Value::Array(vector.into_iter().map(|v| Value::from(v)).collect()),
+        );
         if let Some(meta) = metadata {
             for (k, v) in meta.as_object().unwrap_or(&serde_json::Map::new()) {
                 data.insert(k.clone(), v.clone());
@@ -405,9 +413,7 @@ impl VectorStore for MilvusStore {
             "data": [data],
         });
 
-        let resp: MilvusBaseResponse = self
-            .request("/v2/vectordb/entities/insert", &body)
-            .await?;
+        let resp: MilvusBaseResponse = self.request("/v2/vectordb/entities/insert", &body).await?;
 
         if resp.code != 0 {
             return Err(AstrBotError::Internal(format!(
@@ -432,9 +438,8 @@ impl VectorStore for MilvusStore {
             "outputFields": ["*"],
         });
 
-        let resp: MilvusSearchResponse = self
-            .request("/v2/vectordb/entities/search", &body)
-            .await?;
+        let resp: MilvusSearchResponse =
+            self.request("/v2/vectordb/entities/search", &body).await?;
 
         if resp.code != 0 {
             return Err(AstrBotError::Internal(format!(
@@ -472,9 +477,7 @@ impl VectorStore for MilvusStore {
             "filter": format!("id == '{}'", id),
         });
 
-        let resp: MilvusBaseResponse = self
-            .request("/v2/vectordb/entities/delete", &body)
-            .await?;
+        let resp: MilvusBaseResponse = self.request("/v2/vectordb/entities/delete", &body).await?;
 
         if resp.code != 0 {
             return Err(AstrBotError::Internal(format!(
@@ -487,9 +490,8 @@ impl VectorStore for MilvusStore {
 
     async fn list_collections(&self) -> Result<Vec<String>> {
         let body = serde_json::json!({});
-        let resp: MilvusListCollectionsResponse = self
-            .request("/v2/vectordb/collections/list", &body)
-            .await?;
+        let resp: MilvusListCollectionsResponse =
+            self.request("/v2/vectordb/collections/list", &body).await?;
 
         if resp.code != 0 {
             return Err(AstrBotError::Internal(format!(
@@ -567,7 +569,8 @@ impl Clone for VectorStoreRegistry {
     fn clone(&self) -> Self {
         let new = Self::new();
         for entry in self.stores.iter() {
-            new.stores.insert(entry.key().clone(), entry.value().clone());
+            new.stores
+                .insert(entry.key().clone(), entry.value().clone());
         }
         if let Ok(name) = self.default.read() {
             if let Ok(mut d) = new.default.write() {

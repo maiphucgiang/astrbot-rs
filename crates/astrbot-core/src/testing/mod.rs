@@ -18,7 +18,9 @@ use crate::message::{
     MessageType,
 };
 use crate::platform::{MessageSource, PlatformMetadata, PlatformType};
-use crate::provider::{ChatConfig, ChatMessage, ChatResponse, ChatStreamChunk, ModelInfo, Provider};
+use crate::provider::{
+    ChatConfig, ChatMessage, ChatResponse, ChatStreamChunk, ModelInfo, Provider,
+};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -136,11 +138,7 @@ impl Provider for MockProvider {
         Ok(self.models_list.clone())
     }
 
-    async fn chat(
-        &self,
-        _messages: Vec<ChatMessage>,
-        _config: ChatConfig,
-    ) -> Result<ChatResponse> {
+    async fn chat(&self, _messages: Vec<ChatMessage>, _config: ChatConfig) -> Result<ChatResponse> {
         self.call_count.fetch_add(1, Ordering::Relaxed);
         if self.should_fail_chat {
             return Err(crate::errors::AstrBotError::Provider {
@@ -150,7 +148,11 @@ impl Provider for MockProvider {
         }
         Ok(ChatResponse {
             content: self.chat_response.clone(),
-            model: self.models_list.first().cloned().unwrap_or_else(|| "mock".to_string()),
+            model: self
+                .models_list
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "mock".to_string()),
             usage: None,
             reasoning: None,
             tool_calls: None,
@@ -165,11 +167,7 @@ impl Provider for MockProvider {
         Ok(Box::new(futures_util::stream::empty()))
     }
 
-    async fn embedding(
-        &self,
-        texts: Vec<String>,
-        _model: Option<String>,
-    ) -> Result<Vec<Vec<f32>>> {
+    async fn embedding(&self, texts: Vec<String>, _model: Option<String>) -> Result<Vec<Vec<f32>>> {
         if !self.embeddings.is_empty() {
             return Ok(self.embeddings.clone());
         }
@@ -273,10 +271,12 @@ impl MockPlatformAdapter {
 
         let rx = {
             let mut guard = self.incoming_rx.lock().await;
-            guard.take().ok_or_else(|| crate::errors::AstrBotError::Platform {
-                adapter: self.metadata.name.clone(),
-                message: "receiver already taken".to_string(),
-            })?
+            guard
+                .take()
+                .ok_or_else(|| crate::errors::AstrBotError::Platform {
+                    adapter: self.metadata.name.clone(),
+                    message: "receiver already taken".to_string(),
+                })?
         };
 
         let running = Arc::clone(&self.running);
@@ -316,7 +316,11 @@ impl MockPlatformAdapter {
         Ok(())
     }
 
-    pub async fn reply_message(&self, original: &AstrBotMessage, chain: &MessageChain) -> Result<()> {
+    pub async fn reply_message(
+        &self,
+        original: &AstrBotMessage,
+        chain: &MessageChain,
+    ) -> Result<()> {
         let mut queue = self.outgoing.lock().await;
         queue.push((original.session_id.clone(), chain.clone()));
         Ok(())
@@ -362,10 +366,13 @@ impl MockAdapterShared {
             text: text.into(),
             message_id: uuid::Uuid::new_v4().to_string(),
         };
-        self.tx.send(msg).await.map_err(|_| crate::errors::AstrBotError::Platform {
-            adapter: "Mock".to_string(),
-            message: "channel closed".to_string(),
-        })
+        self.tx
+            .send(msg)
+            .await
+            .map_err(|_| crate::errors::AstrBotError::Platform {
+                adapter: "Mock".to_string(),
+                message: "channel closed".to_string(),
+            })
     }
 }
 
@@ -468,8 +475,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_provider_chat() {
-        let provider = MockProvider::new("m1", "Mock")
-            .with_chat_response("Hello!");
+        let provider = MockProvider::new("m1", "Mock").with_chat_response("Hello!");
         let resp = provider
             .chat(vec![ChatMessage::user("Hi")], ChatConfig::default())
             .await
@@ -481,7 +487,10 @@ mod tests {
     #[tokio::test]
     async fn test_mock_provider_embedding() {
         let provider = MockProvider::new("m1", "Mock").with_embedding_dim(4);
-        let emb = provider.embedding(vec!["test".to_string()], None).await.unwrap();
+        let emb = provider
+            .embedding(vec!["test".to_string()], None)
+            .await
+            .unwrap();
         assert_eq!(emb.len(), 1);
         assert_eq!(emb[0].len(), 4);
     }
@@ -489,7 +498,9 @@ mod tests {
     #[tokio::test]
     async fn test_mock_provider_failure() {
         let provider = MockProvider::new("m1", "Mock").with_chat_failure();
-        let result = provider.chat(vec![ChatMessage::user("Hi")], ChatConfig::default()).await;
+        let result = provider
+            .chat(vec![ChatMessage::user("Hi")], ChatConfig::default())
+            .await;
         assert!(result.is_err());
     }
 
@@ -513,7 +524,10 @@ mod tests {
         adapter.initialize().await.unwrap();
         adapter.start().await.unwrap();
 
-        shared.inject_message("u1", "s1", "hello bot").await.unwrap();
+        shared
+            .inject_message("u1", "s1", "hello bot")
+            .await
+            .unwrap();
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         let msgs = handler.drain_messages().await;
@@ -547,7 +561,9 @@ mod tests {
             message_id: "1".to_string(),
             user_id: "u1".to_string(),
         };
-        let result = adapter.send_message(&source, &MessageChain::new().text("x")).await;
+        let result = adapter
+            .send_message(&source, &MessageChain::new().text("x"))
+            .await;
         assert!(result.is_err());
     }
 }

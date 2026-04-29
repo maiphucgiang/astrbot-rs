@@ -1,12 +1,15 @@
-use async_trait::async_trait;
-use astrbot_core::errors::{AstrBotError, Result};
-use astrbot_core::message::{AstrBotMessage, MessageChain, MessageComponent, MessageHandler, HandlerRef, MessageMember, MessageType};
-use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
-use astrbot_core::net::SharedHttpClient;
 use crate::adapter::PlatformAdapter;
-use axum::{routing::post, Router};
+use astrbot_core::errors::{AstrBotError, Result};
+use astrbot_core::message::{
+    AstrBotMessage, HandlerRef, MessageChain, MessageComponent, MessageHandler, MessageMember,
+    MessageType,
+};
+use astrbot_core::net::SharedHttpClient;
+use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
+use async_trait::async_trait;
 use axum::extract::State;
 use axum::http::StatusCode;
+use axum::{routing::post, Router};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -123,17 +126,11 @@ struct MatrixShared {
 }
 
 impl MatrixShared {
-    async fn send_matrix_message(
-        &self,
-        room_id: &str,
-        chain: &MessageChain,
-    ) -> Result<()> {
+    async fn send_matrix_message(&self, room_id: &str, chain: &MessageChain) -> Result<()> {
         let txn_id = format!("astrbot-{}", Utc::now().timestamp_millis());
         let url = format!(
             "{}/_matrix/client/v3/rooms/{}/send/m.room.message/{}",
-            self.homeserver,
-            room_id,
-            txn_id
+            self.homeserver, room_id, txn_id
         );
 
         let text = chain.plain_text();
@@ -173,7 +170,11 @@ impl MatrixShared {
         Ok(())
     }
 
-    fn build_matrix_content(&self, chain: &MessageChain, plain: &str) -> (String, Option<String>, Option<String>) {
+    fn build_matrix_content(
+        &self,
+        chain: &MessageChain,
+        plain: &str,
+    ) -> (String, Option<String>, Option<String>) {
         let mut has_html = false;
         let mut html_parts: Vec<String> = Vec::new();
 
@@ -185,8 +186,11 @@ impl MatrixShared {
                 MessageComponent::At { target, display } => {
                     has_html = true;
                     let disp = display.as_deref().unwrap_or(target.as_str());
-                    html_parts.push(format!("<a href=\"https://matrix.to/#/{0}\">{1}</a>",
-                        html_escape(target), html_escape(disp)));
+                    html_parts.push(format!(
+                        "<a href=\"https://matrix.to/#/{0}\">{1}</a>",
+                        html_escape(target),
+                        html_escape(disp)
+                    ));
                 }
                 MessageComponent::Image { url, .. } => {
                     if let Some(u) = url {
@@ -204,7 +208,11 @@ impl MatrixShared {
         }
 
         if has_html {
-            (plain.to_string(), Some(html_parts.concat()), Some("org.matrix.custom.html".to_string()))
+            (
+                plain.to_string(),
+                Some(html_parts.concat()),
+                Some("org.matrix.custom.html".to_string()),
+            )
         } else {
             (plain.to_string(), None, None)
         }
@@ -251,8 +259,7 @@ impl MatrixShared {
         };
 
         let timestamp = if let Some(ts) = payload.origin_server_ts {
-            chrono::DateTime::from_timestamp_millis(ts)
-                .unwrap_or_else(chrono::Utc::now)
+            chrono::DateTime::from_timestamp_millis(ts).unwrap_or_else(chrono::Utc::now)
         } else {
             chrono::Utc::now()
         };
@@ -307,8 +314,7 @@ impl MatrixShared {
         };
 
         let timestamp = if let Some(ts) = event.origin_server_ts {
-            chrono::DateTime::from_timestamp_millis(ts)
-                .unwrap_or_else(chrono::Utc::now)
+            chrono::DateTime::from_timestamp_millis(ts).unwrap_or_else(chrono::Utc::now)
         } else {
             chrono::Utc::now()
         };
@@ -325,10 +331,7 @@ impl MatrixShared {
         })
     }
 
-    async fn sync_once(
-        &self,
-        since: Option<&str>,
-    ) -> Result<Option<String>> {
+    async fn sync_once(&self, since: Option<&str>) -> Result<Option<String>> {
         let mut url = format!("{}/_matrix/client/v3/sync", self.homeserver);
         url.push_str("?timeout=30000");
         if let Some(s) = since {
@@ -352,7 +355,9 @@ impl MatrixShared {
             });
         }
 
-        let sync: SyncResponse = resp.json().await
+        let sync: SyncResponse = resp
+            .json()
+            .await
             .map_err(|e| AstrBotError::Serialization(e.to_string()))?;
 
         // Process events
@@ -466,15 +471,24 @@ impl MatrixAdapter {
             enabled: true,
             extra: {
                 let mut map = HashMap::new();
-                map.insert("homeserver".to_string(), serde_json::Value::String(homeserver.clone()));
+                map.insert(
+                    "homeserver".to_string(),
+                    serde_json::Value::String(homeserver.clone()),
+                );
                 if let Some(port) = webhook_port {
-                    map.insert("webhook_port".to_string(), serde_json::Value::Number(port.into()));
+                    map.insert(
+                        "webhook_port".to_string(),
+                        serde_json::Value::Number(port.into()),
+                    );
                 }
-                map.insert("mode".to_string(), if use_sync {
-                    serde_json::Value::String("sync".to_string())
-                } else {
-                    serde_json::Value::String("webhook".to_string())
-                });
+                map.insert(
+                    "mode".to_string(),
+                    if use_sync {
+                        serde_json::Value::String("sync".to_string())
+                    } else {
+                        serde_json::Value::String("webhook".to_string())
+                    },
+                );
                 map
             },
         };
@@ -506,12 +520,23 @@ impl PlatformAdapter for MatrixAdapter {
     }
 
     async fn initialize(&mut self) -> Result<()> {
-        info!("[Matrix] Initializing adapter for {}...", self.shared.homeserver);
+        info!(
+            "[Matrix] Initializing adapter for {}...",
+            self.shared.homeserver
+        );
         // Verify token by calling /api/v3/account/whoami
-        let url = format!("{}/_matrix/client/v3/account/whoami", self.shared.homeserver.trim_end_matches('/'));
-        let resp = self.shared.http_client
+        let url = format!(
+            "{}/_matrix/client/v3/account/whoami",
+            self.shared.homeserver.trim_end_matches('/')
+        );
+        let resp = self
+            .shared
+            .http_client
             .get(&url)
-            .header("Authorization", format!("Bearer {}", self.shared.access_token))
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.shared.access_token),
+            )
             .send()
             .await
             .map_err(|e| AstrBotError::Network(format!("Matrix auth check failed: {}", e)))?;
@@ -529,8 +554,10 @@ impl PlatformAdapter for MatrixAdapter {
     }
 
     async fn start(&mut self) -> Result<()> {
-        info!("[Matrix] Starting adapter (mode: {})...",
-            if self.use_sync { "sync" } else { "webhook" });
+        info!(
+            "[Matrix] Starting adapter (mode: {})...",
+            if self.use_sync { "sync" } else { "webhook" }
+        );
         self.running.store(true, Ordering::Relaxed);
 
         // Start webhook server if configured
@@ -541,7 +568,8 @@ impl PlatformAdapter for MatrixAdapter {
                 .with_state(shared);
 
             let addr = SocketAddr::from(([0, 0, 0, 0], port));
-            let listener = tokio::net::TcpListener::bind(&addr).await
+            let listener = tokio::net::TcpListener::bind(&addr)
+                .await
                 .map_err(|e| AstrBotError::Network(format!("Matrix bind failed: {}", e)))?;
 
             let running = Arc::clone(&self.running);
@@ -592,11 +620,7 @@ impl PlatformAdapter for MatrixAdapter {
         Ok(())
     }
 
-    async fn send_message(
-        &self,
-        target: &MessageSource,
-        chain: &MessageChain,
-    ) -> Result<()> {
+    async fn send_message(&self, target: &MessageSource, chain: &MessageChain) -> Result<()> {
         if !self.running.load(Ordering::Relaxed) {
             return Err(AstrBotError::Platform {
                 adapter: "Matrix".to_string(),
@@ -608,11 +632,7 @@ impl PlatformAdapter for MatrixAdapter {
         self.shared.send_matrix_message(room_id, chain).await
     }
 
-    async fn reply_message(
-        &self,
-        original: &AstrBotMessage,
-        chain: &MessageChain,
-    ) -> Result<()> {
+    async fn reply_message(&self, original: &AstrBotMessage, chain: &MessageChain) -> Result<()> {
         let source = MessageSource {
             platform: PlatformType::Matrix,
             session_id: original.session_id.clone(),
@@ -675,7 +695,10 @@ mod tests {
         let payload: MatrixWebhookPayload = serde_json::from_str(json).unwrap();
         assert_eq!(payload.room_id, Some("!room:matrix.org".to_string()));
         assert_eq!(payload.sender, Some("@user:matrix.org".to_string()));
-        assert_eq!(payload.content.as_ref().unwrap().body, Some("Hello Matrix!".to_string()));
+        assert_eq!(
+            payload.content.as_ref().unwrap().body,
+            Some("Hello Matrix!".to_string())
+        );
     }
 
     #[test]
@@ -731,7 +754,9 @@ mod tests {
         };
 
         let mut chain = MessageChain::new();
-        chain.0.push(MessageComponent::Plain { text: "hi ".to_string() });
+        chain.0.push(MessageComponent::Plain {
+            text: "hi ".to_string(),
+        });
         chain.0.push(MessageComponent::At {
             target: "@alice:matrix.org".to_string(),
             display: Some("Alice".to_string()),

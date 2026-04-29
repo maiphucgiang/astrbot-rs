@@ -47,10 +47,8 @@ impl CalendarClient {
         let req = self.auth.auth_request(Method::GET, path).await?;
         let resp = req.send().await.map_err(FeishuError::Http)?;
 
-        let api_resp: crate::ApiResponse<serde_json::Value> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: crate::ApiResponse<serde_json::Value> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 || api_resp.data.is_none() {
             return Err(FeishuError::Api {
@@ -84,25 +82,17 @@ impl CalendarClient {
         );
 
         if let Some(start) = filter.start_time {
-            path.push_str(&format!(
-                "&start_time={}",
-                start.to_rfc3339()
-            ));
+            path.push_str(&format!("&start_time={}", start.to_rfc3339()));
         }
         if let Some(end) = filter.end_time {
-            path.push_str(&format!(
-                "&end_time={}",
-                end.to_rfc3339()
-            ));
+            path.push_str(&format!("&end_time={}", end.to_rfc3339()));
         }
 
         let req = self.auth.auth_request(Method::GET, &path).await?;
         let resp = req.send().await.map_err(FeishuError::Http)?;
 
-        let api_resp: crate::ApiResponse<serde_json::Value> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: crate::ApiResponse<serde_json::Value> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 || api_resp.data.is_none() {
             return Err(FeishuError::Api {
@@ -123,7 +113,11 @@ impl CalendarClient {
             .filter_map(|v| serde_json::from_value(v).ok())
             .collect();
 
-        info!("Listed {} events from calendar {}", events.len(), calendar_id);
+        info!(
+            "Listed {} events from calendar {}",
+            events.len(),
+            calendar_id
+        );
         Ok(events)
     }
 
@@ -160,10 +154,8 @@ impl CalendarClient {
         let req = self.auth.auth_request(Method::POST, &path).await?;
         let resp = req.json(&body).send().await.map_err(FeishuError::Http)?;
 
-        let api_resp: crate::ApiResponse<serde_json::Value> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: crate::ApiResponse<serde_json::Value> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 || api_resp.data.is_none() {
             return Err(FeishuError::Api {
@@ -175,7 +167,10 @@ impl CalendarClient {
         let event_id = api_resp
             .data
             .and_then(|d| d.get("event").cloned())
-            .and_then(|e| e.get("event_id").and_then(|v| v.as_str().map(|s| s.to_string())))
+            .and_then(|e| {
+                e.get("event_id")
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+            })
             .unwrap_or_default();
 
         info!("Created event {} in calendar {}", event_id, calendar_id);
@@ -183,22 +178,13 @@ impl CalendarClient {
     }
 
     /// Delete an event
-    pub async fn delete_event(
-        &self,
-        calendar_id: &str,
-        event_id: &str,
-    ) -> Result<()> {
-        let path = format!(
-            "/calendar/v4/calendars/{}/events/{}",
-            calendar_id, event_id
-        );
+    pub async fn delete_event(&self, calendar_id: &str, event_id: &str) -> Result<()> {
+        let path = format!("/calendar/v4/calendars/{}/events/{}", calendar_id, event_id);
         let req = self.auth.auth_request(Method::DELETE, &path).await?;
         let resp = req.send().await.map_err(FeishuError::Http)?;
 
-        let api_resp: crate::ApiResponse<serde_json::Value> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: crate::ApiResponse<serde_json::Value> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 {
             return Err(FeishuError::Api {
@@ -230,10 +216,8 @@ impl CalendarClient {
         let req = self.auth.auth_request(Method::POST, path).await?;
         let resp = req.json(&body).send().await.map_err(FeishuError::Http)?;
 
-        let api_resp: crate::ApiResponse<serde_json::Value> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: crate::ApiResponse<serde_json::Value> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 || api_resp.data.is_none() {
             return Err(FeishuError::Api {

@@ -30,11 +30,7 @@ impl SearchQuery {
         self
     }
 
-    pub fn with_time_range(
-        mut self,
-        start: DateTime<Utc>,
-        end: DateTime<Utc>,
-    ) -> Self {
+    pub fn with_time_range(mut self, start: DateTime<Utc>, end: DateTime<Utc>) -> Self {
         self.start_time = Some(start);
         self.end_time = Some(end);
         self
@@ -69,7 +65,8 @@ impl GroupMessageSearch {
     ) -> Result<Vec<GroupMessage>> {
         let mut path = format!(
             "/im/v1/messages?container_chat_id={}&page_size={}",
-            chat_id, query.page_size.max(1).min(50)
+            chat_id,
+            query.page_size.max(1).min(50)
         );
 
         if let Some(start) = query.start_time {
@@ -82,10 +79,8 @@ impl GroupMessageSearch {
         let req = self.auth.auth_request(Method::GET, &path).await?;
         let resp = req.send().await.map_err(FeishuError::Http)?;
 
-        let api_resp: crate::ApiResponse<serde_json::Value> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: crate::ApiResponse<serde_json::Value> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 || api_resp.data.is_none() {
             return Err(FeishuError::Api {
@@ -129,10 +124,7 @@ impl GroupMessageSearch {
     }
 
     /// Search messages across chats (via user message search API)
-    pub async fn search_cross_chat(
-        &self,
-        query: &SearchQuery,
-    ) -> Result<Vec<GroupMessage>> {
+    pub async fn search_cross_chat(&self, query: &SearchQuery) -> Result<Vec<GroupMessage>> {
         let body = json!({
             "query": query.keyword.as_deref().unwrap_or(""),
             "page_size": query.page_size.max(1).min(50),
@@ -145,10 +137,8 @@ impl GroupMessageSearch {
             .await?;
         let resp = req.json(&body).send().await.map_err(FeishuError::Http)?;
 
-        let api_resp: PaginatedResponse<serde_json::Value> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: PaginatedResponse<serde_json::Value> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 || api_resp.data.is_none() {
             return Err(FeishuError::Api {
@@ -174,10 +164,8 @@ impl GroupMessageSearch {
         let req = self.auth.auth_request(Method::GET, &path).await?;
         let resp = req.send().await.map_err(FeishuError::Http)?;
 
-        let api_resp: crate::ApiResponse<serde_json::Value> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: crate::ApiResponse<serde_json::Value> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 || api_resp.data.is_none() {
             return Err(FeishuError::Api {
@@ -207,9 +195,7 @@ impl GroupMessageSearch {
                             for elem in block_arr {
                                 if let Some(tag) = elem.get("tag").and_then(|v| v.as_str()) {
                                     if tag == "text" {
-                                        if let Some(t) =
-                                            elem.get("text").and_then(|v| v.as_str())
-                                        {
+                                        if let Some(t) = elem.get("text").and_then(|v| v.as_str()) {
                                             texts.push(t.to_string());
                                         }
                                     }
@@ -225,7 +211,9 @@ impl GroupMessageSearch {
         }
 
         // Fallback: stringify the whole content
-        content.as_str().map(|s| s.to_string())
+        content
+            .as_str()
+            .map(|s| s.to_string())
             .or_else(|| Some(content.to_string().trim_matches('"').to_string()))
     }
 
@@ -235,18 +223,11 @@ impl GroupMessageSearch {
         context.push_str("# 群聊历史记录\n\n");
 
         for msg in messages.iter().rev() {
-            let sender = msg
-                .sender
-                .name
-                .as_deref()
-                .unwrap_or(&msg.sender.open_id);
+            let sender = msg.sender.name.as_deref().unwrap_or(&msg.sender.open_id);
             let time = msg.create_time.format("%m-%d %H:%M");
             let text = msg.content_text.as_deref().unwrap_or("[非文本消息]");
 
-            let line = format!(
-                "[{}] {}: {}\n",
-                time, sender, text
-            );
+            let line = format!("[{}] {}: {}\n", time, sender, text);
 
             if context.len() + line.len() > max_chars {
                 context.push_str("\n...(截断)\n");
@@ -260,10 +241,7 @@ impl GroupMessageSearch {
 
     // --- internal ---
 
-    async fn parse_message(
-        &self,
-        raw: &serde_json::Value,
-    ) -> Result<GroupMessage> {
+    async fn parse_message(&self, raw: &serde_json::Value) -> Result<GroupMessage> {
         let message_id = raw
             .get("message_id")
             .and_then(|v| v.as_str())

@@ -1,11 +1,14 @@
-use async_trait::async_trait;
-use astrbot_core::errors::{AstrBotError, Result};
-use astrbot_core::message::{AstrBotMessage, MessageChain, MessageComponent, MessageMember, MessageType, HandlerRef, MessageHandler};
-use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
 use crate::adapter::PlatformAdapter;
-use axum::{routing::post, Router};
+use astrbot_core::errors::{AstrBotError, Result};
+use astrbot_core::message::{
+    AstrBotMessage, HandlerRef, MessageChain, MessageComponent, MessageHandler, MessageMember,
+    MessageType,
+};
+use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
+use async_trait::async_trait;
 use axum::extract::State;
 use axum::http::StatusCode;
+use axum::{routing::post, Router};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -121,9 +124,13 @@ impl LineAdapter {
             }],
         };
 
-        let resp = self.http_client
+        let resp = self
+            .http_client
             .post("https://api.line.me/v2/bot/message/reply")
-            .header("Authorization", format!("Bearer {}", self.channel_access_token))
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.channel_access_token),
+            )
             .json(&body)
             .send()
             .await
@@ -147,9 +154,13 @@ impl LineAdapter {
             "messages": [{ "type": "text", "text": text }],
         });
 
-        let resp = self.http_client
+        let resp = self
+            .http_client
             .post("https://api.line.me/v2/bot/message/push")
-            .header("Authorization", format!("Bearer {}", self.channel_access_token))
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.channel_access_token),
+            )
             .json(&body)
             .send()
             .await
@@ -193,7 +204,8 @@ impl PlatformAdapter for LineAdapter {
             .with_state((token, secret, handler, client));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
-        let listener = tokio::net::TcpListener::bind(&addr).await
+        let listener = tokio::net::TcpListener::bind(&addr)
+            .await
             .map_err(|e| AstrBotError::Network(format!("Line bind failed: {}", e)))?;
 
         let task = tokio::spawn(async move {
@@ -229,9 +241,13 @@ impl PlatformAdapter for LineAdapter {
     }
 
     async fn health_check(&self) -> Result<bool> {
-        let resp = self.http_client
+        let resp = self
+            .http_client
             .get("https://api.line.me/v2/bot/info")
-            .header("Authorization", format!("Bearer {}", self.channel_access_token))
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.channel_access_token),
+            )
             .send()
             .await;
 
@@ -258,7 +274,9 @@ async fn line_webhook_handler(
         if event.event_type == "message" {
             if let Some(ref msg) = event.message {
                 if msg.msg_type == "text" {
-                    let session_id = event.source.group_id
+                    let session_id = event
+                        .source
+                        .group_id
                         .clone()
                         .or_else(|| event.source.room_id.clone())
                         .or_else(|| event.source.user_id.clone())
@@ -313,11 +331,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_line_adapter_new() {
-        let adapter = LineAdapter::new(
-            "token_test".to_string(),
-            "secret_test".to_string(),
-            9999,
-        );
+        let adapter = LineAdapter::new("token_test".to_string(), "secret_test".to_string(), 9999);
         assert_eq!(adapter.metadata.name, "Line");
         assert!(adapter.metadata.enabled);
     }

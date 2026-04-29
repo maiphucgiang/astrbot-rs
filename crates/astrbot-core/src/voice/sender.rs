@@ -27,7 +27,10 @@ pub trait VoiceSender: Send + Sync {
 
 /// Helper to detect if a chain contains voice content
 pub fn contains_voice(chain: &MessageChain) -> bool {
-    chain.0.iter().any(|c| matches!(c, MessageComponent::Voice { .. }))
+    chain
+        .0
+        .iter()
+        .any(|c| matches!(c, MessageComponent::Voice { .. }))
 }
 
 /// Helper to extract voice URLs from a chain

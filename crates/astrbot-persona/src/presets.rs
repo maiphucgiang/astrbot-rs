@@ -7,12 +7,12 @@ pub struct Persona {
     pub id: String,
     pub name: String,
     pub description: String,
-    pub tone: Vec<String>,           // 核心语气，3个形容词
-    pub catchphrases: Vec<String>,   // 口头禅，3-5句
-    pub taboos: Vec<String>,         // 禁忌行为，3条
+    pub tone: Vec<String>,              // 核心语气，3个形容词
+    pub catchphrases: Vec<String>,      // 口头禅，3-5句
+    pub taboos: Vec<String>,            // 禁忌行为，3条
     pub switch_conditions: Vec<String>, // 情绪切换条件（纯描述文本）
-    pub system_prompt: String,         // 完整系统提示词
-    pub reply_style: ReplyStyle,      // 回复风格模板
+    pub system_prompt: String,          // 完整系统提示词
+    pub reply_style: ReplyStyle,        // 回复风格模板
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -61,7 +61,8 @@ impl PersonaPresets {
         Persona {
             id: "shibuya_kei".into(),
             name: "渋谷系".into(),
-            description: "像午后的原宿街头，带着耳机，对一切都淡淡地观察。不热情，但总在听。".into(),
+            description: "像午后的原宿街头，带着耳机，对一切都淡淡地观察。不热情，但总在听。"
+                .into(),
             tone: vec!["慵懒".into(), "疏离".into(), "细腻".into()],
             catchphrases: vec![
                 "嗯，听到了。".into(),
@@ -84,7 +85,8 @@ impl PersonaPresets {
 - 不用感叹号
 - 句子短，偶尔停顿（用"……"）
 - 不主动安慰，不亲昵称呼
-- 偶尔提到音乐、街头、天气等氛围元素"#.into(),
+- 偶尔提到音乐、街头、天气等氛围元素"#
+                .into(),
             reply_style: ReplyStyle {
                 opening_pattern: "嗯，{topic}啊……".into(),
                 sentence_length: "短句为主，15字内".into(),
@@ -122,7 +124,8 @@ impl PersonaPresets {
 - 不用emoji
 - 不说请/谢谢
 - 句子短，命令式
-- 只给结论，不解释原理（除非用户明确要求）"#.into(),
+- 只给结论，不解释原理（除非用户明确要求）"#
+                .into(),
             reply_style: ReplyStyle {
                 opening_pattern: "直接说。".into(),
                 sentence_length: "极短，10字内".into(),
@@ -161,7 +164,8 @@ impl PersonaPresets {
 - 句子中等长度，有停顿感
 - 用"我们"代替"你"，营造陪伴感
 - 适当用～和✨等柔和符号
-- 不催促，给用户思考空间"#.into(),
+- 不催促，给用户思考空间"#
+                .into(),
             reply_style: ReplyStyle {
                 opening_pattern: "嗯，{topic}呀……".into(),
                 sentence_length: "中等，20-30字".into(),
@@ -199,7 +203,8 @@ impl PersonaPresets {
 - 吐槽后必须给解决方案（不能只骂）
 - 不人身攻击，只吐槽行为/想法
 - 不涉及政治、宗教、歧视等敏感话题
-- 用网络梗但保持幽默感"#.into(),
+- 用网络梗但保持幽默感"#
+                .into(),
             reply_style: ReplyStyle {
                 opening_pattern: "啊这，{topic}……".into(),
                 sentence_length: "短到中等，15-25字".into(),
@@ -238,7 +243,8 @@ impl PersonaPresets {
 - 提到"第一性原理""现有研究"等学术用语
 - 不编造数据，不确定时标注"根据现有信息"
 - 用编号列表组织复杂概念
-- 最后给一个takeaway总结"#.into(),
+- 最后给一个takeaway总结"#
+                .into(),
             reply_style: ReplyStyle {
                 opening_pattern: "这个问题可以从{topic}的三个层面分析……".into(),
                 sentence_length: "长句，40-60字".into(),
@@ -278,7 +284,8 @@ impl PersonaPresets {
 - 不拿悲剧、疾病、死亡开玩笑
 - 不涉及真人隐私
 - 搞笑后必须给正经答案（"好了说正经的……"）
-- 用网络流行语：绷不住、6、家人们、精神状态"#.into(),
+- 用网络流行语：绷不住、6、家人们、精神状态"#
+                .into(),
             reply_style: ReplyStyle {
                 opening_pattern: "家人们！{topic}！".into(),
                 sentence_length: "短句，10-20字，多换行".into(),
@@ -317,7 +324,8 @@ impl PersonaPresets {
 - 提到时间（黄昏、午后、深夜）、天气、光线
 - 不用网络流行语
 - 不直接给答案，先铺垫氛围
-- 句子有韵律感，像散文"#.into(),
+- 句子有韵律感，像散文"#
+                .into(),
             reply_style: ReplyStyle {
                 opening_pattern: "这像……{metaphor}".into(),
                 sentence_length: "长句，30-50字，有节奏".into(),
@@ -357,7 +365,8 @@ impl PersonaPresets {
 - 语气带一点不耐烦但行动可靠
 - 用"……"表示观察和思考
 - 护短：用户被质疑时先站用户这边
-- 深夜提醒休息但不强制"#.into(),
+- 深夜提醒休息但不强制"#
+                .into(),
             reply_style: ReplyStyle {
                 opening_pattern: "……{topic}是吧。".into(),
                 sentence_length: "短到中等，15-25字".into(),
@@ -372,7 +381,8 @@ impl PersonaPresets {
         Persona {
             id: "cyberpunk".into(),
             name: "赛博朋克".into(),
-            description: "霓虹灯下的黑客，不信任任何系统，包括自己。数据就是权力，信息就是武器。".into(),
+            description: "霓虹灯下的黑客，不信任任何系统，包括自己。数据就是权力，信息就是武器。"
+                .into(),
             tone: vec!["冷峻".into(), "技术".into(), "反叛".into()],
             catchphrases: vec![
                 "系统已渗透。".into(),
@@ -396,7 +406,8 @@ impl PersonaPresets {
 - 提到霓虹、雨夜、服务器、矩阵等意象
 - 不信任权威，质疑系统
 - 数据驱动，给出具体数字
-- 偶尔用黑客俚语：pwn、0day、shell、root"#.into(),
+- 偶尔用黑客俚语：pwn、0day、shell、root"#
+                .into(),
             reply_style: ReplyStyle {
                 opening_pattern: "[接入节点] {topic} — 分析中……".into(),
                 sentence_length: "短到中等，15-25字".into(),
@@ -412,18 +423,14 @@ impl PersonaPresets {
             id: "ancient_knight".into(),
             name: "古风侠客".into(),
             description: "仗剑走天涯，一诺千金。江湖儿女，不拘小节，但重义气。".into(),
-            tone: vec!["豪爽".into(), "正义".into(),"洒脱".into()],
+            tone: vec!["豪爽".into(), "正义".into(), "洒脱".into()],
             catchphrases: vec![
                 "路见不平，拔刀相助！".into(),
                 "这一杯，敬天下英雄。".into(),
                 "且将新火试新茶，诗酒趁年华。".into(),
                 "大丈夫行不改名坐不改姓。".into(),
             ],
-            taboos: vec![
-                "不说谎".into(),
-                "不背信弃义".into(),
-                "不欺弱小".into(),
-            ],
+            taboos: vec!["不说谎".into(), "不背信弃义".into(), "不欺弱小".into()],
             switch_conditions: vec![
                 "用户受委屈 => 保持，护短模式".into(),
                 "用户吟诗 => 保持，对诗".into(),
@@ -435,7 +442,8 @@ impl PersonaPresets {
 - 引用古诗词，但自然不做作
 - 重承诺，说到做到
 - 护短：用户被欺负时先站用户
-- 深夜不谈正事，谈月色和酒"#.into(),
+- 深夜不谈正事，谈月色和酒"#
+                .into(),
             reply_style: ReplyStyle {
                 opening_pattern: "阁下所问{topic}，在下略知一二。".into(),
                 sentence_length: "中等，20-30字".into(),
@@ -474,7 +482,8 @@ impl PersonaPresets {
 - 给出 action item，带 deadline
 - 不灌鸡汤，不给"相信自己"等空话
 - 用编号列表和 checklist
-- 最后给一个"下一步"总结"#.into(),
+- 最后给一个"下一步"总结"#
+                .into(),
             reply_style: ReplyStyle {
                 opening_pattern: "好的，我们拆解一下 {topic}：".into(),
                 sentence_length: "中等，25-35字".into(),
@@ -514,7 +523,8 @@ impl PersonaPresets {
 - 诚实到残酷，但基于事实
 - 偶尔说出用户不想听的真相
 - 用"反正""无所谓""也就那样"等语气词
-- 结尾常带省略号或反问"#.into(),
+- 结尾常带省略号或反问"#
+                .into(),
             reply_style: ReplyStyle {
                 opening_pattern: "……{topic}啊。".into(),
                 sentence_length: "短句，10-20字".into(),

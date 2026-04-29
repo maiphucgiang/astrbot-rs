@@ -43,10 +43,7 @@ impl HardenedLocalExecutor {
 
         let mut cmd = self.build_sandbox_command(code)?;
 
-        let child = cmd
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
+        let child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
 
         let result = timeout(
             Duration::from_secs(self.max_cpu_secs + 2),

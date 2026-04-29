@@ -3,10 +3,12 @@
 //! OpenRouter provides unified access to 100+ LLMs via an OpenAI-compatible API.
 //! Docs: https://openrouter.ai/docs
 
-use async_trait::async_trait;
 use crate::openai::OpenAiProvider;
-use astrbot_core::provider::{Provider, ChatMessage, ChatConfig, ChatResponse, ChatStreamChunk, ModelInfo};
 use astrbot_core::errors::Result;
+use astrbot_core::provider::{
+    ChatConfig, ChatMessage, ChatResponse, ChatStreamChunk, ModelInfo, Provider,
+};
+use async_trait::async_trait;
 use futures_util::Stream;
 
 /// OpenRouter provider wrapper
@@ -41,7 +43,11 @@ impl Provider for OpenRouterProvider {
         self.inner.chat(messages, config).await
     }
 
-    async fn chat_stream(&self, messages: Vec<ChatMessage>, config: ChatConfig) -> Result<Box<dyn Stream<Item = Result<ChatStreamChunk>> + Send>> {
+    async fn chat_stream(
+        &self,
+        messages: Vec<ChatMessage>,
+        config: ChatConfig,
+    ) -> Result<Box<dyn Stream<Item = Result<ChatStreamChunk>> + Send>> {
         self.inner.chat_stream(messages, config).await
     }
 

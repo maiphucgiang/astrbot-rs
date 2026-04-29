@@ -1,5 +1,7 @@
 use crate::message::MessageChain;
-use crate::safety::{SafetyEngine, SafetyResult, SafetyStrategy, KeywordFilter, RegexFilter, preset_engine};
+use crate::safety::{
+    preset_engine, KeywordFilter, RegexFilter, SafetyEngine, SafetyResult, SafetyStrategy,
+};
 
 #[tokio::test]
 async fn test_keyword_filter_safe() {
@@ -20,7 +22,9 @@ async fn test_keyword_filter_violation() {
 #[tokio::test]
 async fn test_regex_filter() {
     let mut filter = RegexFilter::new("url_filter");
-    filter.add_pattern(r"https?://[^\s]+", "URL detected").unwrap();
+    filter
+        .add_pattern(r"https?://[^\s]+", "URL detected")
+        .unwrap();
 
     let safe_chain = MessageChain::new().text("Hello world");
     assert_eq!(filter.check(&safe_chain).await, SafetyResult::Safe);
@@ -73,7 +77,9 @@ async fn test_safety_engine_collect_all() {
     let chain = MessageChain::new().text("Buy spam now https://bad.com");
     let results = engine.check(&chain).await;
     assert_eq!(results.len(), 2);
-    assert!(results.iter().any(|r| matches!(r, SafetyResult::Violation { .. })));
+    assert!(results
+        .iter()
+        .any(|r| matches!(r, SafetyResult::Violation { .. })));
 }
 
 #[tokio::test]
@@ -83,5 +89,8 @@ async fn test_keyword_filter_case_sensitive() {
     assert_eq!(filter.check(&chain).await, SafetyResult::Safe);
 
     let chain2 = MessageChain::new().text("This is Bad");
-    assert!(matches!(filter.check(&chain2).await, SafetyResult::Violation { .. }));
+    assert!(matches!(
+        filter.check(&chain2).await,
+        SafetyResult::Violation { .. }
+    ));
 }

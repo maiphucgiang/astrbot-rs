@@ -1,7 +1,7 @@
-use async_trait::async_trait;
 use crate::errors::Result;
 use crate::message::{AstrBotMessage, MessageChain};
 use crate::platform::MessageSource;
+use async_trait::async_trait;
 
 /// Base trait for all events in AstrBot
 #[async_trait]
@@ -22,13 +22,19 @@ pub enum EventResult {
     /// No action needed
     Nothing,
     /// Forward to another session
-    Forward { target: MessageSource, chain: MessageChain },
+    Forward {
+        target: MessageSource,
+        chain: MessageChain,
+    },
     /// Acknowledge a notice event (e.g., member joined, friend added)
     NoticeAck { action: String },
     /// Acknowledge a meta event (e.g., heartbeat, status update)
     MetaAck { action: String },
     /// Accept/reject a request (e.g., friend request, group join request)
-    RequestResponse { approved: bool, reason: Option<String> },
+    RequestResponse {
+        approved: bool,
+        reason: Option<String>,
+    },
 }
 
 impl EventResult {
@@ -37,7 +43,9 @@ impl EventResult {
     }
 
     pub fn reply_text(text: impl Into<String>) -> Self {
-        Self::MessageReply { chain: MessageChain::new().text(text) }
+        Self::MessageReply {
+            chain: MessageChain::new().text(text),
+        }
     }
 
     pub fn nothing() -> Self {
@@ -45,19 +53,29 @@ impl EventResult {
     }
 
     pub fn notice_ack(action: impl Into<String>) -> Self {
-        Self::NoticeAck { action: action.into() }
+        Self::NoticeAck {
+            action: action.into(),
+        }
     }
 
     pub fn meta_ack(action: impl Into<String>) -> Self {
-        Self::MetaAck { action: action.into() }
+        Self::MetaAck {
+            action: action.into(),
+        }
     }
 
     pub fn approve() -> Self {
-        Self::RequestResponse { approved: true, reason: None }
+        Self::RequestResponse {
+            approved: true,
+            reason: None,
+        }
     }
 
     pub fn reject(reason: impl Into<String>) -> Self {
-        Self::RequestResponse { approved: false, reason: Some(reason.into()) }
+        Self::RequestResponse {
+            approved: false,
+            reason: Some(reason.into()),
+        }
     }
 }
 

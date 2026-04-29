@@ -91,10 +91,12 @@ impl WasmPluginLoader {
         version: impl Into<String>,
     ) -> Result<WasmPlugin> {
         let name_str: String = name.into();
-        let bytes = tokio::fs::read(path).await.map_err(|e| AstrBotError::Plugin {
-            plugin: name_str.clone(),
-            message: format!("read file failed: {}", e),
-        })?;
+        let bytes = tokio::fs::read(path)
+            .await
+            .map_err(|e| AstrBotError::Plugin {
+                plugin: name_str.clone(),
+                message: format!("read file failed: {}", e),
+            })?;
         self.load_from_bytes(&bytes, name_str, version).await
     }
 
@@ -171,10 +173,11 @@ impl WasmPluginInstance {
     /// 调用导出的 `init` 函数（如果存在）
     pub fn call_init(&mut self) -> Result<()> {
         if let Ok(init) = self.instance.get_typed_func::<(), ()>(&self.store, "init") {
-            init.call(&mut self.store, ()).map_err(|e| AstrBotError::Plugin {
-                plugin: "wasm".to_string(),
-                message: format!("init failed: {}", e),
-            })?;
+            init.call(&mut self.store, ())
+                .map_err(|e| AstrBotError::Plugin {
+                    plugin: "wasm".to_string(),
+                    message: format!("init failed: {}", e),
+                })?;
         }
         Ok(())
     }
@@ -219,8 +222,8 @@ impl WasmPluginInstance {
         let mem_data_len = memory.data(&self.store).len();
         if required > mem_data_len {
             let pages_needed = ((required - mem_data_len) + 65535) / 65536;
-            let pages = wasmi::core::Pages::new(pages_needed as u32)
-                .unwrap_or(wasmi::core::Pages::from(0));
+            let pages =
+                wasmi::core::Pages::new(pages_needed as u32).unwrap_or(wasmi::core::Pages::from(0));
             memory
                 .grow(&mut self.store, pages)
                 .map_err(|e| AstrBotError::Plugin {

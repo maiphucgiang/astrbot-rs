@@ -1,14 +1,20 @@
-use async_trait::async_trait;
-use astrbot_core::errors::{AstrBotError, Result};
-use astrbot_core::message::{AstrBotMessage, MessageChain, MessageComponent, MessageMember, MessageType, HandlerRef, MessageHandler};
-use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
 use crate::adapter::PlatformAdapter;
-use axum::{routing::post, Router};
+use astrbot_core::errors::{AstrBotError, Result};
+use astrbot_core::message::{
+    AstrBotMessage, HandlerRef, MessageChain, MessageComponent, MessageHandler, MessageMember,
+    MessageType,
+};
+use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
+use async_trait::async_trait;
 use axum::extract::State;
 use axum::http::StatusCode;
+use axum::{routing::post, Router};
+use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::Sha256;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,9 +22,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
-use base64::{Engine as _, engine::general_purpose};
 
 // ---------------------------------------------------------------------------
 // DingTalk API models
@@ -112,7 +115,8 @@ impl DingTalkShared {
             }
         }
 
-        let resp = self.http_client
+        let resp = self
+            .http_client
             .get("https://oapi.dingtalk.com/gettoken")
             .query(&[
                 ("appkey", self.app_key.as_str()),
@@ -122,23 +126,28 @@ impl DingTalkShared {
             .await
             .map_err(|e| AstrBotError::Network(format!("DingTalk token request: {}", e)))?;
 
-        let data: DingTalkTokenResponse = resp.json().await
+        let data: DingTalkTokenResponse = resp
+            .json()
+            .await
             .map_err(|e| AstrBotError::Serialization(format!("DingTalk token parse: {}", e)))?;
 
         if let Some(errcode) = data.errcode {
             if errcode != 0 {
                 return Err(AstrBotError::Platform {
                     adapter: "dingtalk".to_string(),
-                    message: format!("DingTalk token error {}: {}", errcode, data.errmsg.unwrap_or_default()),
+                    message: format!(
+                        "DingTalk token error {}: {}",
+                        errcode,
+                        data.errmsg.unwrap_or_default()
+                    ),
                 });
             }
         }
 
-        let token = data.access_token
-            .ok_or_else(|| AstrBotError::Platform {
-                adapter: "dingtalk".to_string(),
-                message: "No access_token in response".to_string(),
-            })?;
+        let token = data.access_token.ok_or_else(|| AstrBotError::Platform {
+            adapter: "dingtalk".to_string(),
+            message: "No access_token in response".to_string(),
+        })?;
 
         let expire_at = chrono::Utc::now().timestamp() + data.expires_in.unwrap_or(7200);
 
@@ -150,11 +159,7 @@ impl DingTalkShared {
         Ok(token)
     }
 
-    async fn send_message(
-        &self,
-        user_id: &str,
-        content: &str,
-    ) -> Result<()> {
+    async fn send_message(&self, user_id: &str, content: &str) -> Result<()> {
         let token = self.get_access_token().await?;
 
         let body = DingTalkSendMessageRequest {
@@ -259,7 +264,8 @@ impl PlatformAdapter for DingTalkAdapter {
             .with_state(shared);
 
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
-        let listener = tokio::net::TcpListener::bind(&addr).await
+        let listener = tokio::net::TcpListener::bind(&addr)
+            .await
             .map_err(|e| AstrBotError::Network(format!("DingTalk bind failed: {}", e)))?;
 
         let task = tokio::spawn(async move {
@@ -291,7 +297,9 @@ impl PlatformAdapter for DingTalkAdapter {
 
     async fn reply_message(&self, original: &AstrBotMessage, chain: &MessageChain) -> Result<()> {
         let content = chain.plain_text();
-        self.shared.send_message(&original.sender.user_id, &content).await
+        self.shared
+            .send_message(&original.sender.user_id, &content)
+            .await
     }
 
     async fn health_check(&self) -> Result<bool> {
@@ -321,12 +329,12 @@ async fn dingtalk_callback_handler(
     let nonce = payload.nonce.unwrap_or_default();
     let encrypt = payload.encrypt.unwrap_or_default();
     let msg_signature = payload.msg_signature.unwrap_or_default();
-    
+
     if encrypt.is_empty() {
         warn!("[DingTalk] callback received with empty encrypt");
         return StatusCode::BAD_REQUEST;
     }
-    
+
     // 1. Verify signature
     let sign_content = format!("{}\n{}\n{}", timestamp, nonce, encrypt);
     let mut mac = match Hmac::<Sha256>::new_from_slice(shared.app_secret.as_bytes()) {
@@ -338,7 +346,7 @@ async fn dingtalk_callback_handler(
     };
     mac.update(sign_content.as_bytes());
     let computed_sig = general_purpose::STANDARD.encode(mac.finalize().into_bytes());
-    
+
     if computed_sig != msg_signature {
         warn!(
             "[DingTalk] signature mismatch: computed={}, received={}",
@@ -346,7 +354,7 @@ async fn dingtalk_callback_handler(
         );
         return StatusCode::UNAUTHORIZED;
     }
-    
+
     // 2. Decrypt message (AES-256-CBC)
     let decrypted = match decrypt_dingtalk_message(shared.encoding_aes_key.as_deref(), &encrypt) {
         Ok(data) => data,
@@ -355,7 +363,7 @@ async fn dingtalk_callback_handler(
             return StatusCode::BAD_REQUEST;
         }
     };
-    
+
     // 3. Parse decrypted JSON and invoke handler
     let msg_text = match String::from_utf8(decrypted) {
         Ok(s) => s,
@@ -364,9 +372,9 @@ async fn dingtalk_callback_handler(
             return StatusCode::BAD_REQUEST;
         }
     };
-    
+
     info!("[DingTalk] received message: {}", msg_text);
-    
+
     // Parse the JSON to extract actual content
     let content = if let Ok(json) = serde_json::from_str::<serde_json::Value>(&msg_text) {
         json.get("text")
@@ -374,13 +382,15 @@ async fn dingtalk_callback_handler(
             .and_then(|c| c.as_str())
             .map(|s| s.to_string())
             .or_else(|| {
-                json.get("content").and_then(|c| c.as_str()).map(|s| s.to_string())
+                json.get("content")
+                    .and_then(|c| c.as_str())
+                    .map(|s| s.to_string())
             })
             .unwrap_or_else(|| msg_text.clone())
     } else {
         msg_text.clone()
     };
-    
+
     // 4. Build AstrBotMessage and call handler
     if let Some(ref handler) = shared.message_handler {
         let chain = DingTalkShared::parse_message_content(&content);
@@ -414,10 +424,13 @@ async fn dingtalk_callback_handler(
 /// Decrypt DingTalk AES-encrypted message
 /// Key: base64_decode(EncodingAESKey) — 43 chars base64 → 32 bytes AES key
 /// IV: first 16 bytes of the key
-fn decrypt_dingtalk_message(encoding_aes_key: Option<&str>, encrypt: &str) -> std::result::Result<Vec<u8>, String> {
-    use cbc::cipher::{BlockDecryptMut, KeyIvInit};
+fn decrypt_dingtalk_message(
+    encoding_aes_key: Option<&str>,
+    encrypt: &str,
+) -> std::result::Result<Vec<u8>, String> {
     use cbc::cipher::block_padding::Pkcs7;
-    
+    use cbc::cipher::{BlockDecryptMut, KeyIvInit};
+
     let aes_key = match encoding_aes_key {
         Some(key) => key,
         None => {
@@ -427,38 +440,38 @@ fn decrypt_dingtalk_message(encoding_aes_key: Option<&str>, encrypt: &str) -> st
                 .map_err(|e| format!("base64 decode failed: {}", e));
         }
     };
-    
+
     // Decode base64 encrypted data
     let encrypted_data = general_purpose::STANDARD
         .decode(encrypt)
         .map_err(|e| format!("base64 decode failed: {}", e))?;
-    
+
     // Derive key: base64_decode(EncodingAESKey) → 32 bytes
     let key = general_purpose::STANDARD
         .decode(aes_key)
         .map_err(|e| format!("base64 decode aes key failed: {}", e))?;
-    
+
     if key.len() != 32 {
         return Err(format!("AES key length must be 32, got {}", key.len()));
     }
-    
+
     let iv: [u8; 16] = key[..16]
         .try_into()
         .map_err(|_| "iv derivation failed".to_string())?;
     let key: [u8; 32] = key[..32]
         .try_into()
         .map_err(|_| "key derivation failed".to_string())?;
-    
+
     // AES-256-CBC decrypt
     type Aes256Cbc = cbc::Decryptor<aes::Aes256>;
     let mut decryptor = Aes256Cbc::new_from_slices(&key, &iv)
         .map_err(|e| format!("cipher init failed: {:?}", e))?;
-    
+
     let mut buf = encrypted_data.clone();
     let decrypted = decryptor
         .decrypt_padded_mut::<Pkcs7>(&mut buf)
         .map_err(|e| format!("decrypt failed: {:?}", e))?;
-    
+
     Ok(decrypted.to_vec())
 }
 

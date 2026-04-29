@@ -3,17 +3,48 @@ use serde_json::Value;
 
 /// 白名单模块：只允许这些 import
 static ALLOWED_MODULES: &[&str] = &[
-    "json", "re", "math", "random", "datetime", "statistics",
-    "hashlib", "hmac", "base64", "string", "collections", "itertools",
-    "functools", "operator", "types", "typing", "dataclasses",
+    "json",
+    "re",
+    "math",
+    "random",
+    "datetime",
+    "statistics",
+    "hashlib",
+    "hmac",
+    "base64",
+    "string",
+    "collections",
+    "itertools",
+    "functools",
+    "operator",
+    "types",
+    "typing",
+    "dataclasses",
 ];
 
 /// 黑名单 AST 节点：检测到直接拒绝
 static FORBIDDEN_NAMES: &[&str] = &[
-    "__import__", "eval", "exec", "compile", "open",
-    "os", "sys", "subprocess", "socket", "urllib", "http",
-    "ctypes", "ffi", "platform", "pwd", "grp", "shutil",
-    "pathlib", "tempfile", "multiprocessing", "threading",
+    "__import__",
+    "eval",
+    "exec",
+    "compile",
+    "open",
+    "os",
+    "sys",
+    "subprocess",
+    "socket",
+    "urllib",
+    "http",
+    "ctypes",
+    "ffi",
+    "platform",
+    "pwd",
+    "grp",
+    "shutil",
+    "pathlib",
+    "tempfile",
+    "multiprocessing",
+    "threading",
 ];
 
 pub struct AstChecker;
@@ -80,13 +111,19 @@ print(json.dumps({{"ok": len(issues) == 0, "issues": issues}}))
             .output()?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let result: Value = serde_json::from_str(&stdout)
-            .map_err(|e| anyhow::anyhow!("AST check JSON parse failed: {} (stdout: {})", e, stdout))?;
+        let result: Value = serde_json::from_str(&stdout).map_err(|e| {
+            anyhow::anyhow!("AST check JSON parse failed: {} (stdout: {})", e, stdout)
+        })?;
 
         if let Some(false) = result["ok"].as_bool() {
             let issues = result["issues"]
                 .as_array()
-                .map(|a| a.iter().map(|v| v.as_str().unwrap_or("?")).collect::<Vec<_>>().join("; "))
+                .map(|a| {
+                    a.iter()
+                        .map(|v| v.as_str().unwrap_or("?"))
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                })
                 .unwrap_or_else(|| "Unknown AST violation".to_string());
             bail!("CodeExecutor AST check failed: {}", issues);
         }

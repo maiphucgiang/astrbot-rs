@@ -1,8 +1,11 @@
-use async_trait::async_trait;
-use astrbot_core::errors::{AstrBotError, Result};
-use astrbot_core::message::{AstrBotMessage, MessageChain, MessageComponent, MessageMember, MessageType, HandlerRef, MessageHandler};
-use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
 use crate::adapter::PlatformAdapter;
+use astrbot_core::errors::{AstrBotError, Result};
+use astrbot_core::message::{
+    AstrBotMessage, HandlerRef, MessageChain, MessageComponent, MessageHandler, MessageMember,
+    MessageType,
+};
+use astrbot_core::platform::{MessageSource, PlatformMetadata, PlatformType};
+use async_trait::async_trait;
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -11,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-use tokio::time::{sleep, Duration, interval};
+use tokio::time::{interval, sleep, Duration};
 use tracing::{error, info, warn};
 
 // ---------------------------------------------------------------------------
@@ -150,15 +153,17 @@ impl KookAdapter {
     }
 
     async fn get_gateway_url(&self) -> Result<String> {
-        let resp = self.http_client
+        let resp = self
+            .http_client
             .get("https://www.kookapp.cn/api/v3/gateway/index")
             .headers(self.auth_headers())
             .send()
             .await
             .map_err(|e| AstrBotError::Network(format!("Kook gateway request failed: {}", e)))?;
 
-        let data: KookGatewayResponse = resp.json().await
-            .map_err(|e| AstrBotError::Serialization(format!("Kook gateway parse failed: {}", e)))?;
+        let data: KookGatewayResponse = resp.json().await.map_err(|e| {
+            AstrBotError::Serialization(format!("Kook gateway parse failed: {}", e))
+        })?;
 
         if data.code != 0 {
             return Err(AstrBotError::Platform {
@@ -170,18 +175,15 @@ impl KookAdapter {
         Ok(data.data.url)
     }
 
-    async fn send_channel_message(
-        &self,
-        channel_id: &str,
-        content: &str,
-    ) -> Result<()> {
+    async fn send_channel_message(&self, channel_id: &str, content: &str) -> Result<()> {
         let body = KookSendMessageRequest {
             target_id: channel_id.to_string(),
             content: content.to_string(),
             quote: None,
         };
 
-        let resp = self.http_client
+        let resp = self
+            .http_client
             .post("https://www.kookapp.cn/api/v3/message/create")
             .headers(self.auth_headers())
             .json(&body)
@@ -203,7 +205,11 @@ impl KookAdapter {
     }
 
     /// Build a MessageChain from Kook event content and type.
-    fn build_chain(content: &str, event_type: i32, extra: &HashMap<String, serde_json::Value>) -> MessageChain {
+    fn build_chain(
+        content: &str,
+        event_type: i32,
+        extra: &HashMap<String, serde_json::Value>,
+    ) -> MessageChain {
         let mut chain = MessageChain::new();
         match event_type {
             2 => {
@@ -277,9 +283,12 @@ impl PlatformAdapter for KookAdapter {
                             }
                         });
 
-                        if let Err(e) = write.send(tokio_tungstenite::tungstenite::Message::Text(
-                            identify.to_string()
-                        )).await {
+                        if let Err(e) = write
+                            .send(tokio_tungstenite::tungstenite::Message::Text(
+                                identify.to_string(),
+                            ))
+                            .await
+                        {
                             error!("[Kook] Identify failed: {}", e);
                             continue;
                         }
@@ -293,9 +302,12 @@ impl PlatformAdapter for KookAdapter {
                             while heartbeat_running.load(Ordering::SeqCst) {
                                 ticker.tick().await;
                                 let ping = serde_json::json!({"s": 3, "sn": 0});
-                                if let Err(e) = heartbeat_write.send(
-                                    tokio_tungstenite::tungstenite::Message::Text(ping.to_string())
-                                ).await {
+                                if let Err(e) = heartbeat_write
+                                    .send(tokio_tungstenite::tungstenite::Message::Text(
+                                        ping.to_string(),
+                                    ))
+                                    .await
+                                {
                                     error!("[Kook] Heartbeat send failed: {}", e);
                                     break;
                                 }
@@ -304,37 +316,51 @@ impl PlatformAdapter for KookAdapter {
 
                         // Message read loop
                         while running.load(Ordering::SeqCst) {
-                            match tokio::time::timeout(
-                                Duration::from_secs(60),
-                                read.next()
-                            ).await {
+                            match tokio::time::timeout(Duration::from_secs(60), read.next()).await {
                                 Ok(Some(Ok(msg))) => {
-                                    if let tokio_tungstenite::tungstenite::Message::Text(text) = msg {
-                                        if let Ok(payload) = serde_json::from_str::<KookWsPayload>(&text) {
+                                    if let tokio_tungstenite::tungstenite::Message::Text(text) = msg
+                                    {
+                                        if let Ok(payload) =
+                                            serde_json::from_str::<KookWsPayload>(&text)
+                                        {
                                             match payload.s {
                                                 0 => {
                                                     // Event dispatch
                                                     if let Some(data) = payload.d {
-                                                        if let Ok(event) = serde_json::from_value::<KookEvent>(data.clone()) {
+                                                        if let Ok(event) =
+                                                            serde_json::from_value::<KookEvent>(
+                                                                data.clone(),
+                                                            )
+                                                        {
                                                             if event.author_id.is_empty() {
                                                                 continue;
                                                             }
                                                             let platform = PlatformType::Custom;
-                                                            let chain = Self::build_chain(&event.content, event.event_type, &event.extra);
+                                                            let chain = Self::build_chain(
+                                                                &event.content,
+                                                                event.event_type,
+                                                                &event.extra,
+                                                            );
                                                             let member = MessageMember {
                                                                 user_id: event.author_id.clone(),
-                                                                nickname: Some(event.author_id.clone()),
+                                                                nickname: Some(
+                                                                    event.author_id.clone(),
+                                                                ),
                                                                 card: None,
                                                                 role: None,
                                                                 is_self: false,
                                                             };
-                                                            let message_type = if event.channel_type == "PERSON" {
-                                                                MessageType::Private
-                                                            } else {
-                                                                MessageType::Group
-                                                            };
+                                                            let message_type =
+                                                                if event.channel_type == "PERSON" {
+                                                                    MessageType::Private
+                                                                } else {
+                                                                    MessageType::Group
+                                                                };
                                                             let message = AstrBotMessage {
-                                                                message_id: event.msg_id.clone().unwrap_or_default(),
+                                                                message_id: event
+                                                                    .msg_id
+                                                                    .clone()
+                                                                    .unwrap_or_default(),
                                                                 timestamp: Utc::now(),
                                                                 platform,
                                                                 session_id: event.target_id.clone(),
@@ -415,12 +441,14 @@ impl PlatformAdapter for KookAdapter {
         if content.is_empty() {
             return Ok(());
         }
-        self.send_channel_message(&target.session_id, &content).await
+        self.send_channel_message(&target.session_id, &content)
+            .await
     }
 
     async fn reply_message(&self, original: &AstrBotMessage, chain: &MessageChain) -> Result<()> {
         let content = chain.plain_text();
-        self.send_channel_message(&original.session_id, &content).await
+        self.send_channel_message(&original.session_id, &content)
+            .await
     }
 
     async fn health_check(&self) -> Result<bool> {

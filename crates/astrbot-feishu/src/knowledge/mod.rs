@@ -42,10 +42,8 @@ impl DocClient {
         let req = self.auth.auth_request(Method::GET, &path).await?;
         let resp = req.send().await.map_err(FeishuError::Http)?;
 
-        let api_resp: crate::ApiResponse<DocumentInfo> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: crate::ApiResponse<DocumentInfo> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 || api_resp.data.is_none() {
             return Err(FeishuError::Api {
@@ -63,10 +61,8 @@ impl DocClient {
         let req = self.auth.auth_request(Method::GET, &path).await?;
         let resp = req.send().await.map_err(FeishuError::Http)?;
 
-        let api_resp: crate::ApiResponse<serde_json::Value> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: crate::ApiResponse<serde_json::Value> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 || api_resp.data.is_none() {
             return Err(FeishuError::Api {
@@ -104,10 +100,8 @@ impl DocClient {
         let req = self.auth.auth_request(Method::GET, &path).await?;
         let resp = req.send().await.map_err(FeishuError::Http)?;
 
-        let api_resp: PaginatedResponse<serde_json::Value> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: PaginatedResponse<serde_json::Value> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 || api_resp.data.is_none() {
             return Err(FeishuError::Api {
@@ -149,10 +143,8 @@ impl BitableClient {
         let req = self.auth.auth_request(Method::GET, &path).await?;
         let resp = req.send().await.map_err(FeishuError::Http)?;
 
-        let api_resp: crate::ApiResponse<BitableInfo> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: crate::ApiResponse<BitableInfo> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 || api_resp.data.is_none() {
             return Err(FeishuError::Api {
@@ -165,18 +157,13 @@ impl BitableClient {
     }
 
     /// List tables in a bitable
-    pub async fn list_tables(
-        &self,
-        app_token: &str,
-    ) -> Result<Vec<serde_json::Value>> {
+    pub async fn list_tables(&self, app_token: &str) -> Result<Vec<serde_json::Value>> {
         let path = format!("/bitable/v1/apps/{}/tables", app_token);
         let req = self.auth.auth_request(Method::GET, &path).await?;
         let resp = req.send().await.map_err(FeishuError::Http)?;
 
-        let api_resp: crate::ApiResponse<serde_json::Value> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: crate::ApiResponse<serde_json::Value> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 || api_resp.data.is_none() {
             return Err(FeishuError::Api {
@@ -214,10 +201,8 @@ impl BitableClient {
         let req = self.auth.auth_request(Method::GET, &path).await?;
         let resp = req.send().await.map_err(FeishuError::Http)?;
 
-        let api_resp: PaginatedResponse<BitableRecord> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: PaginatedResponse<BitableRecord> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 || api_resp.data.is_none() {
             return Err(FeishuError::Api {
@@ -236,19 +221,14 @@ impl BitableClient {
         table_id: &str,
         fields: serde_json::Value,
     ) -> Result<BitableRecord> {
-        let path = format!(
-            "/bitable/v1/apps/{}/tables/{}/records",
-            app_token, table_id
-        );
+        let path = format!("/bitable/v1/apps/{}/tables/{}/records", app_token, table_id);
         let body = json!({ "fields": fields });
 
         let req = self.auth.auth_request(Method::POST, &path).await?;
         let resp = req.json(&body).send().await.map_err(FeishuError::Http)?;
 
-        let api_resp: crate::ApiResponse<BitableRecord> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: crate::ApiResponse<BitableRecord> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 || api_resp.data.is_none() {
             return Err(FeishuError::Api {
@@ -277,10 +257,8 @@ impl BitableClient {
         let req = self.auth.auth_request(Method::PUT, &path).await?;
         let resp = req.json(&body).send().await.map_err(FeishuError::Http)?;
 
-        let api_resp: crate::ApiResponse<BitableRecord> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: crate::ApiResponse<BitableRecord> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 || api_resp.data.is_none() {
             return Err(FeishuError::Api {
@@ -308,10 +286,8 @@ impl BitableClient {
         let req = self.auth.auth_request(Method::POST, &path).await?;
         let resp = req.json(&body).send().await.map_err(FeishuError::Http)?;
 
-        let api_resp: crate::ApiResponse<serde_json::Value> = resp
-            .json()
-            .await
-            .map_err(FeishuError::Http)?;
+        let api_resp: crate::ApiResponse<serde_json::Value> =
+            resp.json().await.map_err(FeishuError::Http)?;
 
         if api_resp.code != 0 || api_resp.data.is_none() {
             return Err(FeishuError::Api {
@@ -336,22 +312,13 @@ impl BitableClient {
     }
 
     /// Convert records to markdown for RAG context
-    pub async fn records_to_markdown(
-        &self,
-        app_token: &str,
-        table_id: &str,
-    ) -> Result<String> {
+    pub async fn records_to_markdown(&self, app_token: &str, table_id: &str) -> Result<String> {
         let mut all_records = Vec::new();
         let mut page_token: Option<String> = None;
 
         loop {
             let page = self
-                .list_records(
-                    app_token,
-                    table_id,
-                    page_token.as_deref(),
-                    500,
-                )
+                .list_records(app_token, table_id, page_token.as_deref(), 500)
                 .await?;
 
             all_records.extend(page.items);
@@ -363,10 +330,17 @@ impl BitableClient {
         }
 
         let mut md = String::new();
-        md.push_str(&format!("# Bitable Records ({} total)\n\n", all_records.len()));
+        md.push_str(&format!(
+            "# Bitable Records ({} total)\n\n",
+            all_records.len()
+        ));
 
         for (i, record) in all_records.iter().enumerate() {
-            md.push_str(&format!("## Record {} (ID: {})\n\n", i + 1, record.record_id));
+            md.push_str(&format!(
+                "## Record {} (ID: {})\n\n",
+                i + 1,
+                record.record_id
+            ));
             md.push_str(&format!("```json\n{}\n```\n\n", record.fields.to_string()));
         }
 

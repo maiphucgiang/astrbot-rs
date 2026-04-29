@@ -1,6 +1,6 @@
 use crate::rag::{
-    Document, DocumentParser, EmbeddingRecord, EmbeddingStore, MemoryEmbeddingStore, SplitStrategy,
-    TextChunk, TextSplitter, Retriever,
+    Document, DocumentParser, EmbeddingRecord, EmbeddingStore, MemoryEmbeddingStore, Retriever,
+    SplitStrategy, TextChunk, TextSplitter,
 };
 use crate::testing::MockProvider;
 use crate::vector_store::MemoryVectorStore;
@@ -13,7 +13,10 @@ async fn test_text_splitter_fixed() {
         content: "Hello world this is a test document for splitting.".to_string(),
         metadata: None,
     };
-    let splitter = TextSplitter::new(SplitStrategy::FixedSize { chunk_size: 10, overlap: 2 });
+    let splitter = TextSplitter::new(SplitStrategy::FixedSize {
+        chunk_size: 10,
+        overlap: 2,
+    });
     let chunks = splitter.split(&doc);
     assert!(!chunks.is_empty());
     assert_eq!(chunks[0].doc_id, "d1");
@@ -40,8 +43,18 @@ async fn test_text_splitter_paragraph() {
 async fn test_memory_embedding_store() {
     let mut store = MemoryEmbeddingStore::new();
     let records = vec![
-        EmbeddingRecord { chunk_id: "c1".to_string(), doc_id: "d1".to_string(), text: "hello".to_string(), embedding: vec![1.0, 0.0, 0.0, 0.0] },
-        EmbeddingRecord { chunk_id: "c2".to_string(), doc_id: "d1".to_string(), text: "world".to_string(), embedding: vec![0.0, 1.0, 0.0, 0.0] },
+        EmbeddingRecord {
+            chunk_id: "c1".to_string(),
+            doc_id: "d1".to_string(),
+            text: "hello".to_string(),
+            embedding: vec![1.0, 0.0, 0.0, 0.0],
+        },
+        EmbeddingRecord {
+            chunk_id: "c2".to_string(),
+            doc_id: "d1".to_string(),
+            text: "world".to_string(),
+            embedding: vec![0.0, 1.0, 0.0, 0.0],
+        },
     ];
     store.store(records).await.unwrap();
     assert_eq!(store.count(), 2);
@@ -95,7 +108,7 @@ async fn test_rag_full_pipeline_e2e() {
     let provider = std::sync::Arc::new(
         MockProvider::new("mock", "Mock")
             .with_embedding_dim(8)
-            .with_chat_response("RAG reply")
+            .with_chat_response("RAG reply"),
     );
     let store = std::sync::Arc::new(MemoryVectorStore::new());
     let retriever = Retriever::new(provider.clone(), "mock", store, "rag_e2e", 3);
@@ -114,18 +127,30 @@ async fn test_rag_full_pipeline_e2e() {
         ),
     ];
 
-    let splitter = TextSplitter::new(SplitStrategy::FixedSize { chunk_size: 60, overlap: 10 });
+    let splitter = TextSplitter::new(SplitStrategy::FixedSize {
+        chunk_size: 60,
+        overlap: 10,
+    });
     for doc in &docs {
         retriever.index_document(doc, &splitter).await.unwrap();
     }
 
     // Step 2: Query about memory safety — should return Rust doc chunks first
-    let results = retriever.query("memory safety in systems languages").await.unwrap();
-    assert!(!results.is_empty(), "RAG query should return at least one result");
+    let results = retriever
+        .query("memory safety in systems languages")
+        .await
+        .unwrap();
+    assert!(
+        !results.is_empty(),
+        "RAG query should return at least one result"
+    );
 
     // The top result should be from the Rust document
     let top_meta = results[0].metadata.as_ref().expect("metadata should exist");
-    let top_doc_id = top_meta.get("doc_id").and_then(|v| v.as_str()).unwrap_or("");
+    let top_doc_id = top_meta
+        .get("doc_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     assert!(
         top_doc_id.starts_with("Rust") || top_doc_id.is_empty(),
         "Top result should relate to Rust (memory safety). Got doc_id: {}",
@@ -133,11 +158,23 @@ async fn test_rag_full_pipeline_e2e() {
     );
 
     // Step 3: Query about dynamic typing — should return Python doc chunks first
-    let results2 = retriever.query("dynamic typing and interpreted language").await.unwrap();
-    assert!(!results2.is_empty(), "Second RAG query should return results");
+    let results2 = retriever
+        .query("dynamic typing and interpreted language")
+        .await
+        .unwrap();
+    assert!(
+        !results2.is_empty(),
+        "Second RAG query should return results"
+    );
 
-    let top2_meta = results2[0].metadata.as_ref().expect("metadata should exist");
-    let top2_doc_id = top2_meta.get("doc_id").and_then(|v| v.as_str()).unwrap_or("");
+    let top2_meta = results2[0]
+        .metadata
+        .as_ref()
+        .expect("metadata should exist");
+    let top2_doc_id = top2_meta
+        .get("doc_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     assert!(
         top2_doc_id.starts_with("Python") || top2_doc_id.is_empty(),
         "Top result should relate to Python. Got doc_id: {}",
@@ -146,16 +183,17 @@ async fn test_rag_full_pipeline_e2e() {
 
     // Step 4: Verify all results have scores
     for r in &results {
-        assert!(r.score > 0.0, "All search results should have positive similarity scores");
+        assert!(
+            r.score > 0.0,
+            "All search results should have positive similarity scores"
+        );
     }
 }
 
 /// E2E test with Paragraph + Recursive strategies to ensure splitter variety
 #[tokio::test]
 async fn test_rag_pipeline_with_recursive_splitter() {
-    let provider = std::sync::Arc::new(
-        MockProvider::new("mock", "Mock").with_embedding_dim(4)
-    );
+    let provider = std::sync::Arc::new(MockProvider::new("mock", "Mock").with_embedding_dim(4));
     let store = std::sync::Arc::new(MemoryVectorStore::new());
     let retriever = Retriever::new(provider, "mock", store, "rag_recursive", 2);
 
@@ -166,10 +204,12 @@ async fn test_rag_pipeline_with_recursive_splitter() {
         metadata: None,
     };
 
-    let splitter = TextSplitter::new(SplitStrategy::Recursive { chunk_size: 40, overlap: 5 });
+    let splitter = TextSplitter::new(SplitStrategy::Recursive {
+        chunk_size: 40,
+        overlap: 5,
+    });
     retriever.index_document(&doc, &splitter).await.unwrap();
 
     let results = retriever.query("async programming patterns").await.unwrap();
     assert!(!results.is_empty());
 }
-

@@ -1,7 +1,7 @@
 use astrbot_feishu::*;
 use chrono::Utc;
+use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
-use wiremock::matchers::{method, path, header};
 
 async fn setup_mock_auth(server: &MockServer) {
     Mock::given(method("POST"))
@@ -30,8 +30,7 @@ async fn test_tenant_token_fetch() {
         verification_token: None,
     };
 
-    let auth = auth::FeishuAuth::new(creds)
-        .with_base_url(server.uri());
+    let auth = auth::FeishuAuth::new(creds).with_base_url(server.uri());
 
     let token = auth.tenant_access_token().await.unwrap();
     assert_eq!(token, "test_token_123");
@@ -154,7 +153,10 @@ async fn test_bitable_list_records() {
     let auth = auth::FeishuAuth::new(creds).with_base_url(server.uri());
     let bitable = knowledge::BitableClient::new(auth);
 
-    let result = bitable.list_records("app_test", "tbl_test", None, 500).await.unwrap();
+    let result = bitable
+        .list_records("app_test", "tbl_test", None, 500)
+        .await
+        .unwrap();
     assert_eq!(result.items.len(), 2);
     assert_eq!(result.items[0].record_id, "rec_1");
 }

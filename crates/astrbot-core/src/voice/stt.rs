@@ -144,7 +144,12 @@ impl SttProvider for OpenAiWhisper {
         SttEngine::health_check(self).await
     }
     fn supported_formats(&self) -> Vec<String> {
-        vec!["wav".to_string(), "mp3".to_string(), "m4a".to_string(), "ogg".to_string()]
+        vec![
+            "wav".to_string(),
+            "mp3".to_string(),
+            "m4a".to_string(),
+            "ogg".to_string(),
+        ]
     }
 }
 
@@ -159,7 +164,10 @@ pub struct SenseVoiceStt {
 
 impl SenseVoiceStt {
     pub fn new(model_path: String, python_path: String) -> Self {
-        Self { model_path, python_path }
+        Self {
+            model_path,
+            python_path,
+        }
     }
 }
 
@@ -187,11 +195,16 @@ impl SttEngine for SenseVoiceStt {
         let _ = tokio::fs::remove_file(&temp_path).await;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(AstrBotError::Internal(format!("SenseVoice failed: {}", stderr)));
+            return Err(AstrBotError::Internal(format!(
+                "SenseVoice failed: {}",
+                stderr
+            )));
         }
         let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if text.is_empty() {
-            return Err(AstrBotError::Internal("SenseVoice returned empty".to_string()));
+            return Err(AstrBotError::Internal(
+                "SenseVoice returned empty".to_string(),
+            ));
         }
         Ok(text)
     }
@@ -205,7 +218,9 @@ impl SttEngine for SenseVoiceStt {
         if output.status.success() {
             Ok(())
         } else {
-            Err(AstrBotError::Internal("SenseVoice dependency missing".to_string()))
+            Err(AstrBotError::Internal(
+                "SenseVoice dependency missing".to_string(),
+            ))
         }
     }
 }
