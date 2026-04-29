@@ -373,6 +373,47 @@ impl PlatformAdapter for LarkAdapter {
             .expect("set_message_handler must be called before start() when shared has only one owner");
         shared_mut.message_handler = Some(handler);
     }
+
+    async fn send_voice(&self, target: &MessageSource, data: Vec<u8>, format: &str) -> Result<()> {
+        let token = self.shared.get_tenant_access_token().await?;
+        let upload_url = "https://open.feishu.cn/open-apis/im/v1/files";
+        let data_clone = data.clone();
+        let part = reqwest::multipart::Part::bytes(data)
+            .file_name(format!("voice.{}", format))
+            .mime_str(&format!("audio/{}", format))
+            .unwrap_or_else(|_| reqwest::multipart::Part::bytes(data_clone));
+        let form = reqwest::multipart::Form::new()
+            .text("file_type", "audio")
+            .text("file_name", format!("voice.{}", format))
+            .text("parent_type", "im_msg")
+            .text("parent_node", target.session_id.clone())
+            .part("file", part);
+        let resp = self.shared.http_client.post(upload_url)
+            .header("Authorization", format!("Bearer {}", token))
+            .multipart(form).send().await
+            .map_err(|e| AstrBotError::Network(format!("Lark file upload failed: {}", e)))?;
+        if !resp.status().is_success() {
+            let status = resp.status(); let text = resp.text().await.unwrap_or_default();
+            return Err(AstrBotError::Platform { adapter: "lark".to_string(), message: format!("Lark file upload error: {} - {}", status, text) });
+        }
+        let resp_json: serde_json::Value = resp.json().await
+            .map_err(|e| AstrBotError::Platform { adapter: "lark".to_string(), message: format!("Failed to parse upload response: {}", e) })?;
+        let file_key = resp_json.get("data").and_then(|d| d.get("file_key")).and_then(|v| v.as_str())
+            .ok_or_else(|| AstrBotError::Platform { adapter: "lark".to_string(), message: "No file_key in Lark upload response".to_string() })?;
+        let body = LarkSendMessageRequest {
+            receive_id: target.session_id.clone(), msg_type: "audio".to_string(),
+            content: serde_json::json!({"file_key": file_key}).to_string(),
+        };
+        let send_resp = self.shared.http_client.post("https://open.feishu.cn/open-apis/im/v1/messages")
+            .header("Authorization", format!("Bearer {}", token))
+            .json(&body).send().await
+            .map_err(|e| AstrBotError::Network(format!("Lark send audio failed: {}", e)))?;
+        if !send_resp.status().is_success() {
+            let status = send_resp.status(); let text = send_resp.text().await.unwrap_or_default();
+            return Err(AstrBotError::Platform { adapter: "lark".to_string(), message: format!("Lark send audio error: {} - {}", status, text) });
+        }
+        info!("[Lark] Voice sent successfully"); Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -660,4 +660,32 @@ impl PlatformAdapter for TelegramAdapter {
         let mut h = self.handler.lock().unwrap();
         *h = Some(handler);
     }
+
+    async fn send_voice(&self, target: &MessageSource, data: Vec<u8>, format: &str) -> Result<()> {
+        if !self.running.load(Ordering::Relaxed) {
+            return Err(AstrBotError::Platform {
+                adapter: "Telegram".to_string(),
+                message: "adapter not running".to_string(),
+            });
+        }
+        let chat_id = &target.session_id;
+        let base_url = format!("{}/bot{}", self.api_base, self.bot_token);
+        let url = format!("{}/sendVoice", base_url);
+        let data_clone = data.clone();
+        let part = reqwest::multipart::Part::bytes(data)
+            .file_name(format!("voice.{}", format))
+            .mime_str(&format!("audio/{}", format))
+            .unwrap_or_else(|_| reqwest::multipart::Part::bytes(data_clone));
+        let form = reqwest::multipart::Form::new()
+            .text("chat_id", chat_id.clone())
+            .part("voice", part);
+        let response = self.http_client.post(&url).multipart(form).send().await
+            .map_err(|e| AstrBotError::Platform { adapter: "Telegram".to_string(), message: format!("HTTP request failed: {}", e) })?;
+        if !response.status().is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(AstrBotError::Platform { adapter: "Telegram".to_string(), message: format!("Telegram API error: {} - {}", response.status(), body) });
+        }
+        info!("[Telegram] Voice sent successfully");
+        Ok(())
+    }
 }

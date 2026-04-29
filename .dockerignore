@@ -1,0 +1,32 @@
+# Git
+.git
+.gitignore
+
+# Rust build artifacts
+target/
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Documentation (not needed for build)
+docs/
+*.md
+
+# Test artifacts
+*.tmp
+*.patch
+
+# Local config (mounted at runtime)
+config.json

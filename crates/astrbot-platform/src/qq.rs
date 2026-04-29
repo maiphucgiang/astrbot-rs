@@ -597,4 +597,20 @@ impl PlatformAdapter for QQAdapter {
         let mut h = self.handler.lock().unwrap();
         *h = Some(handler);
     }
+
+    async fn send_voice(&self, target: &MessageSource, data: Vec<u8>, format: &str) -> Result<()> {
+        if !self.running.load(Ordering::Relaxed) {
+            return Err(AstrBotError::Platform { adapter: "QQ".to_string(), message: "adapter not running".to_string() });
+        }
+        let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+        let tmp_path = format!("/tmp/astrbot_voice_{}.{}", timestamp, format);
+        if let Err(e) = tokio::fs::write(&tmp_path, &data).await {
+            return Err(AstrBotError::Platform { adapter: "QQ".to_string(), message: format!("Failed to write temp voice file: {}", e) });
+        }
+        let mut chain = MessageChain::new();
+        chain.0.push(MessageComponent::Voice { url: Some(tmp_path.clone()), file_id: None, base64: None });
+        let result = self.send_message(target, &chain).await;
+        let _ = tokio::fs::remove_file(&tmp_path).await;
+        result
+    }
 }
