@@ -1,5 +1,6 @@
 pub mod adapter;
 pub mod dingtalk;
+pub mod discord;
 pub mod kook;
 pub mod lark;
 pub mod matrix;

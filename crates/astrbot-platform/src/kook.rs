@@ -209,7 +209,7 @@ impl KookAdapter {
             2 => {
                 // Image
                 if let Some(url) = extra.get("url").and_then(|v| v.as_str()) {
-                    chain = chain.image(url.to_string());
+                    chain = chain.image_url(url);
                 } else {
                     chain = chain.text("[图片]");
                 }
