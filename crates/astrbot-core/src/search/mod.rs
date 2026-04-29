@@ -55,12 +55,12 @@ pub trait SearchEngine: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
-// Tavily search (real HTTP skeleton)
+// Tavily search (real HTTP implementation)
 // ---------------------------------------------------------------------------
 
 /// Tavily API client.
 ///
-/// Skeleton: performs a real POST to `https://api.tavily.com/search`.
+/// Performs real POST to `https://api.tavily.com/search`.
 /// A valid `TAVILY_API_KEY` is required for non-error responses.
 pub struct TavilySearch {
     api_key: String,
@@ -199,12 +199,12 @@ impl SearchEngine for TavilySearch {
 }
 
 // ---------------------------------------------------------------------------
-// Brave search (skeleton — no real key required for structure)
+// Brave search (real HTTP implementation)
 // ---------------------------------------------------------------------------
 
 /// Brave Search API client.
 ///
-/// Skeleton: struct + trait impl wired to Brave's Web Search API.
+/// Wired to Brave's Web Search API.
 /// A real `BRAVE_API_KEY` is needed for live calls.
 pub struct BraveSearch {
     api_key: String,
@@ -379,7 +379,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_tavily_search_skeleton_without_key() {
+    async fn test_tavily_search_without_key() {
         // Without a valid key the real HTTP call will fail with 401/403,
         // but the struct and trait wiring should compile and execute.
         let engine = TavilySearch::new("invalid-key-for-test");
@@ -401,7 +401,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_brave_search_skeleton_without_key() {
+    async fn test_brave_search_without_key() {
         let engine = BraveSearch::new("invalid-key-for-test");
         let result = engine.search("rust", 3).await;
         assert!(
