@@ -58,17 +58,61 @@ impl OpenAiTts {
 
 #[async_trait]
 impl TtsEngine for OpenAiTts {
-    async fn synthesize(&self, _text: &str) -> Result<Bytes> {
-        info!("OpenAiTts synthesize called (skeleton)");
-        // Skeleton: will be wired to reqwest + /v1/audio/speech endpoint.
-        Err(AstrBotError::NotImplemented(
-            "OpenAiTts::synthesize not yet implemented".to_string(),
-        ))
+    async fn synthesize(&self, text: &str) -> Result<Bytes> {
+        info!("[OpenAiTts] synthesize — {} chars", text.len());
+
+        let client = reqwest::Client::new();
+        let url = format!("{}/v1/audio/speech", self.base_url);
+
+        let body = serde_json::json!({
+            "model": self.model,
+            "input": text,
+            "voice": self.voice,
+        });
+
+        let resp = client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| AstrBotError::Network(format!("TTS request failed: {}", e)))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text_err = resp.text().await.unwrap_or_default();
+            return Err(AstrBotError::Network(format!(
+                "TTS HTTP {}: {}",
+                status, text_err
+            )));
+        }
+
+        let audio = resp
+            .bytes()
+            .await
+            .map_err(|e| AstrBotError::Network(format!("TTS audio read: {}", e)))?;
+
+        Ok(audio)
     }
 
     async fn health_check(&self) -> Result<()> {
-        info!("OpenAiTts health_check called (skeleton)");
-        // Skeleton: placeholder OK.
-        Ok(())
+        let client = reqwest::Client::new();
+        let url = format!("{}/v1/models", self.base_url);
+        let resp = client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .send()
+            .await
+            .map_err(|e| AstrBotError::Network(format!("TTS health check: {}", e)))?;
+
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(AstrBotError::Network(format!(
+                "TTS health check failed: HTTP {}",
+                resp.status()
+            )))
+        }
     }
 }

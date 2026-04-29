@@ -18,7 +18,7 @@ chrono = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["multipart"] }
 axum = { workspace = true }
 tower = { workspace = true }
 uuid = { workspace = true }

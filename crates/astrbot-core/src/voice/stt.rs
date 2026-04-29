@@ -50,17 +50,76 @@ impl OpenAiWhisper {
 
 #[async_trait]
 impl SttEngine for OpenAiWhisper {
-    async fn transcribe(&self, _audio: Bytes) -> Result<String> {
-        info!("OpenAiWhisper transcribe called (skeleton)");
-        // Skeleton: will be wired to reqwest + /v1/audio/transcriptions endpoint.
-        Err(AstrBotError::NotImplemented(
-            "OpenAiWhisper::transcribe not yet implemented".to_string(),
-        ))
+    async fn transcribe(&self, audio: Bytes) -> Result<String> {
+        info!("[OpenAiWhisper] transcribe — {} bytes", audio.len());
+
+        let client = reqwest::Client::new();
+        let url = format!("{}/v1/audio/transcriptions", self.base_url);
+
+        let part = reqwest::multipart::Part::bytes(Vec::from(audio))
+            .file_name("audio.wav")
+            .mime_str("audio/wav")
+            .map_err(|e| AstrBotError::Network(format!("multipart build: {}", e)))?;
+
+        let form = reqwest::multipart::Form::new()
+            .text("model", self.model.clone())
+            .part("file", part);
+
+        let resp = client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| AstrBotError::Network(format!("Whisper request failed: {}", e)))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(AstrBotError::Network(format!(
+                "Whisper HTTP {}: {}",
+                status, text
+            )));
+        }
+
+        let json: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| AstrBotError::Serialization(format!("Whisper JSON parse: {}", e)))?;
+
+        let text = json
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if text.is_empty() {
+            return Err(AstrBotError::Internal(
+                "Whisper returned empty transcription".to_string(),
+            ));
+        }
+
+        Ok(text)
     }
 
     async fn health_check(&self) -> Result<()> {
-        info!("OpenAiWhisper health_check called (skeleton)");
-        // Skeleton: placeholder OK.
-        Ok(())
+        // Lightweight probe: check API key format and endpoint reachability
+        let client = reqwest::Client::new();
+        let url = format!("{}/v1/models", self.base_url);
+        let resp = client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .send()
+            .await
+            .map_err(|e| AstrBotError::Network(format!("Whisper health check: {}", e)))?;
+
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(AstrBotError::Network(format!(
+                "Whisper health check failed: HTTP {}",
+                resp.status()
+            )))
+        }
     }
 }
