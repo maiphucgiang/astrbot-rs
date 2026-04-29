@@ -239,9 +239,63 @@ fn parse_telegram_message(msg: &TelegramMessage) -> AstrBotMessage {
 
     // Handle text (with entities for @mentions)
     if let Some(ref text) = msg.text {
-        // Simple approach: just add plain text for now
-        // TODO: parse entities to extract @mentions
-        if !text.is_empty() {
+        let mut entities = msg.entities.clone();
+        // Sort by offset so we can iterate in order
+        entities.sort_by_key(|e| e.offset);
+        
+        let mut last_offset: usize = 0;
+        let text_len = text.len();
+        
+        for entity in entities {
+            let start = entity.offset as usize;
+            let end = (entity.offset + entity.length) as usize;
+            
+            // Skip out-of-bounds entities
+            if start > text_len || end > text_len {
+                continue;
+            }
+            
+            // Add plain text before this entity
+            if start > last_offset {
+                let plain = &text[last_offset..start];
+                if !plain.is_empty() {
+                    chain.0.push(MessageComponent::Plain { text: plain.to_string() });
+                }
+            }
+            
+            match entity.entity_type.as_str() {
+                "mention" => {
+                    let mention_text = &text[start..end];
+                    // Remove the leading '@' for target
+                    let target = mention_text.strip_prefix('@').unwrap_or(mention_text).to_string();
+                    chain.0.push(MessageComponent::At { target, display: Some(mention_text.to_string()) });
+                }
+                "text_mention" => {
+                    let mention_text = &text[start..end];
+                    chain.0.push(MessageComponent::At { target: mention_text.to_string(), display: Some(mention_text.to_string()) });
+                }
+                _ => {
+                    // Other entity types: add as plain text
+                    let entity_text = &text[start..end];
+                    if !entity_text.is_empty() {
+                        chain.0.push(MessageComponent::Plain { text: entity_text.to_string() });
+                    }
+                }
+            }
+            
+            last_offset = end;
+        }
+        
+        // Add remaining plain text after last entity
+        if last_offset < text_len {
+            let plain = &text[last_offset..];
+            if !plain.is_empty() {
+                chain.0.push(MessageComponent::Plain { text: plain.to_string() });
+            }
+        }
+        
+        // If no entities at all, add the whole text as plain
+        if msg.entities.is_empty() && !text.is_empty() {
             chain.0.push(MessageComponent::Plain { text: text.clone() });
         }
     }
