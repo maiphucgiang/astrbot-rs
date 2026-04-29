@@ -79,6 +79,14 @@ impl TemplateRegistry {
                 default_model: "llama3".to_string(),
                 extra: HashMap::new(),
             },
+            ProviderTemplate {
+                id: "baidu".to_string(),
+                name: "Baidu Qianfan (ERNIE)".to_string(),
+                provider_type: "baidu".to_string(),
+                base_url: Some("https://qianfan.baidubce.com/compatible-mode/v1".to_string()),
+                default_model: "ernie-4.0-turbo-8k".to_string(),
+                extra: HashMap::new(),
+            },
         ];
         for t in builtins {
             self.templates.insert(t.id.clone(), t);
@@ -134,7 +142,8 @@ mod tests {
         assert!(registry.get("openai").is_some());
         assert!(registry.get("kimi").is_some());
         assert!(registry.get("deepseek").is_some());
-        assert_eq!(registry.list().len(), 6);
+        assert!(registry.get("baidu").is_some());
+        assert_eq!(registry.list().len(), 7);
     }
 
     #[test]
@@ -144,6 +153,6 @@ mod tests {
         let json = registry.export_json().unwrap();
         let mut registry2 = TemplateRegistry::new();
         registry2.load_json(&json).unwrap();
-        assert_eq!(registry2.list().len(), 6);
+        assert_eq!(registry2.list().len(), 7);
     }
 }

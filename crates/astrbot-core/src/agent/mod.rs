@@ -10,6 +10,9 @@ use crate::provider::{ChatMessage, ChatConfig, Provider};
 mod executors;
 pub use executors::*;
 
+mod tool_loop;
+pub use tool_loop::*;
+
 /// Agent execution result
 #[derive(Debug, Clone)]
 pub enum AgentResult {
@@ -170,12 +173,20 @@ impl AgentRegistry {
         self.configs.values().collect()
     }
 
-    /// Execute with a specific agent
+    /// Execute with a specific agent (single turn)
     pub async fn execute(
         &self, id: &str, ctx: &AgentContext) -> Result<AgentResult> {
         let executor = self.get(id)
             .ok_or_else(|| crate::errors::AstrBotError::NotFound(format!("agent: {}", id)))?;
         executor.execute(ctx).await
+    }
+
+    /// Execute with multi-turn tool calling loop
+    /// If the agent is a ToolCallingAgentExecutor, this is already handled internally.
+    /// For other executors, falls back to single-turn execute.
+    pub async fn execute_loop(
+        &self, id: &str, ctx: &AgentContext) -> Result<AgentResult> {
+        self.execute(id, ctx).await
     }
 
     /// Health check all executors

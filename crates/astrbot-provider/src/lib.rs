@@ -16,6 +16,7 @@ pub mod openrouter;
 pub mod perplexity;
 pub mod together;
 pub mod zerooneai;
+pub mod baidu;
 
 pub use openai_compatible::*;
 pub use registry::*;

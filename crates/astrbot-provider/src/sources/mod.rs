@@ -20,3 +20,4 @@ pub mod fireworks;
 pub mod perplexity;
 pub mod together;
 pub mod zerooneai;
+pub mod baidu;

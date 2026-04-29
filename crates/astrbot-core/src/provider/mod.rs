@@ -35,17 +35,29 @@ pub struct ChatMessage {
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Tool calls made by the assistant (for function calling)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<crate::tools::ToolCall>>,
+    /// Tool call ID this message is responding to (role=tool)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 impl ChatMessage {
     pub fn system(content: impl Into<String>) -> Self {
-        Self { role: "system".to_string(), content: content.into(), name: None }
+        Self { role: "system".to_string(), content: content.into(), name: None, tool_calls: None, tool_call_id: None }
     }
     pub fn user(content: impl Into<String>) -> Self {
-        Self { role: "user".to_string(), content: content.into(), name: None }
+        Self { role: "user".to_string(), content: content.into(), name: None, tool_calls: None, tool_call_id: None }
     }
     pub fn assistant(content: impl Into<String>) -> Self {
-        Self { role: "assistant".to_string(), content: content.into(), name: None }
+        Self { role: "assistant".to_string(), content: content.into(), name: None, tool_calls: None, tool_call_id: None }
+    }
+    pub fn assistant_with_tools(content: impl Into<String>, tool_calls: Vec<crate::tools::ToolCall>) -> Self {
+        Self { role: "assistant".to_string(), content: content.into(), name: None, tool_calls: Some(tool_calls), tool_call_id: None }
+    }
+    pub fn tool(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self { role: "tool".to_string(), content: content.into(), name: None, tool_calls: None, tool_call_id: Some(tool_call_id.into()) }
     }
 }
 
@@ -69,6 +81,9 @@ pub struct ChatResponse {
     pub usage: Option<TokenUsage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<String>,
+    /// Tool calls requested by the model (for function calling)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<crate::tools::ToolCall>>,
 }
 
 /// A chunk from a streaming response

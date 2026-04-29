@@ -14,3 +14,4 @@ async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 libloading = "0.8"
+reqwest = { workspace = true }

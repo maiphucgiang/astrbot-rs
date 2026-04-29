@@ -119,7 +119,24 @@ impl PluginInstaller {
         Ok(())
     }
 
-    /// List installed plugins
+    /// Uninstall a plugin by name
+    pub async fn uninstall(&self, name: &str) -> Result<()> {
+        let target = self.plugin_dir.join(name);
+        if !target.exists() {
+            return Err(AstrBotError::NotFound(format!(
+                "Plugin '{}' is not installed",
+                name
+            )));
+        }
+        tokio::fs::remove_dir_all(&target)
+            .await
+            .map_err(|e| AstrBotError::Plugin {
+                plugin: "installer".to_string(),
+                message: format!("Failed to uninstall plugin '{}': {}", name, e),
+            })?;
+        info!("[PluginInstaller] uninstalled '{}'", name);
+        Ok(())
+    }
     pub async fn list_installed(&self) -> Result<Vec<String>> {
         let mut plugins = Vec::new();
         let mut entries = tokio::fs::read_dir(&self.plugin_dir)

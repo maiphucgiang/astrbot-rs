@@ -371,6 +371,7 @@ async fn _test_provider_chat(
         "perplexity" => Box::new(astrbot_provider::sources::perplexity::create(config.api_key, config.model)),
         "together" => Box::new(astrbot_provider::sources::together::create(config.api_key, config.model)),
         "zerooneai" => Box::new(astrbot_provider::sources::zerooneai::create(config.api_key, config.model)),
+        "baidu" => Box::new(astrbot_provider::sources::baidu::create(config.api_key, config.model)),
         _ => {
             return json!({
                 "success": false,
