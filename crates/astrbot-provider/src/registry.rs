@@ -57,6 +57,30 @@ impl ProviderRegistry {
         registry.register("hyperbolic", |c| {
             Box::new(crate::sources::hyperbolic::create(c.api_key, c.model))
         });
+        registry.register("ai21", |c| {
+            Box::new(crate::sources::ai21::create(c.api_key, c.model))
+        });
+        registry.register("azure", |c| {
+            Box::new(crate::sources::azure::create(c.api_key, c.model))
+        });
+        registry.register("baichuan", |c| {
+            Box::new(crate::sources::baichuan::create(c.api_key, c.model))
+        });
+        registry.register("cohere", |c| {
+            Box::new(crate::sources::cohere::create(c.api_key, c.model))
+        });
+        registry.register("fireworks", |c| {
+            Box::new(crate::sources::fireworks::create(c.api_key, c.model))
+        });
+        registry.register("perplexity", |c| {
+            Box::new(crate::sources::perplexity::create(c.api_key, c.model))
+        });
+        registry.register("together", |c| {
+            Box::new(crate::sources::together::create(c.api_key, c.model))
+        });
+        registry.register("zerooneai", |c| {
+            Box::new(crate::sources::zerooneai::create(c.api_key, c.model))
+        });
         registry.register("baidu", |c| {
             Box::new(crate::sources::baidu::create(c.api_key, c.model))
         });

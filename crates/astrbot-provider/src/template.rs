@@ -177,6 +177,6 @@ mod tests {
         let json = registry.export_json().unwrap();
         let mut registry2 = TemplateRegistry::new();
         registry2.load_json(&json).unwrap();
-        assert_eq!(registry2.list().len(), 8);
+        assert_eq!(registry2.list().len(), 10);
     }
 }
