@@ -386,35 +386,35 @@ async fn dingtalk_callback_handler(
         let chain = DingTalkShared::parse_message_content(&content);
         let sender = MessageMember {
             user_id: "dingtalk_user".to_string(),
-            nickname: "DingTalk".to_string(),
-            avatar: None,
+            nickname: Some("DingTalk".to_string()),
+            card: None,
+            role: None,
+            is_self: false,
         };
         let message = AstrBotMessage {
             message_id: format!("dt_{}", timestamp),
+            timestamp: chrono::Utc::now(),
+            platform: PlatformType::Dingtalk,
+            session_id: "default".to_string(),
             sender,
-            timestamp: chrono::Utc::now().timestamp() as u64,
-            message_type: MessageType::Text,
-            raw_message: chain.clone(),
-            processed_message: None,
-            group_id: None,
-            is_at_me: true,
+            message_type: MessageType::Private,
+            chain,
+            raw_payload: None,
         };
-        
+
         let handler_clone = Arc::clone(handler);
         tokio::spawn(async move {
-            if let Err(e) = handler_clone.handle_message(message).await {
-                warn!("[DingTalk] handler error: {}", e);
-            }
+            handler_clone.on_message(message).await;
         });
     }
-    
+
     StatusCode::OK
 }
 
 /// Decrypt DingTalk AES-encrypted message
 /// Key: base64_decode(EncodingAESKey) — 43 chars base64 → 32 bytes AES key
 /// IV: first 16 bytes of the key
-fn decrypt_dingtalk_message(encoding_aes_key: Option<&str>, encrypt: &str) -> Result<Vec<u8>, String> {
+fn decrypt_dingtalk_message(encoding_aes_key: Option<&str>, encrypt: &str) -> std::result::Result<Vec<u8>, String> {
     use cbc::cipher::{BlockDecryptMut, KeyIvInit};
     use cbc::cipher::block_padding::Pkcs7;
     

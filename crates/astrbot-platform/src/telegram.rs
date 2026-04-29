@@ -681,9 +681,10 @@ impl PlatformAdapter for TelegramAdapter {
             .part("voice", part);
         let response = self.http_client.post(&url).multipart(form).send().await
             .map_err(|e| AstrBotError::Platform { adapter: "Telegram".to_string(), message: format!("HTTP request failed: {}", e) })?;
-        if !response.status().is_success() {
+        let status = response.status();
+        if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            return Err(AstrBotError::Platform { adapter: "Telegram".to_string(), message: format!("Telegram API error: {} - {}", response.status(), body) });
+            return Err(AstrBotError::Platform { adapter: "Telegram".to_string(), message: format!("Telegram API error: {} - {}", status, body) });
         }
         info!("[Telegram] Voice sent successfully");
         Ok(())

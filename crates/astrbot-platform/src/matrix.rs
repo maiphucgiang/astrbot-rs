@@ -353,7 +353,7 @@ impl MatrixShared {
         }
 
         let sync: SyncResponse = resp.json().await
-            .map_err(|e| AstrBotError::Serialization(e))?;
+            .map_err(|e| AstrBotError::Serialization(e.to_string()))?;
 
         // Process events
         if let Some(ref rooms) = sync.rooms {
@@ -396,7 +396,7 @@ async fn matrix_webhook_handler(
 ) -> StatusCode {
     if let Some(msg) = shared.parse_webhook_payload(payload) {
         let handler_opt = shared.message_handler.read().await.clone();
-        if let Some(ref handler) = handler_opt {
+        if let Some(handler) = handler_opt {
             tokio::spawn(async move {
                 handler.on_message(msg).await;
             });

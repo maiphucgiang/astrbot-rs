@@ -25,3 +25,6 @@ aes = "0.8"
 cbc = { version = "0.1", features = ["block-padding", "alloc"] }
 sha1 = "0.10"
 axum = { workspace = true }
+chrono = { workspace = true }
+tokio-tungstenite = { version = "0.21", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
