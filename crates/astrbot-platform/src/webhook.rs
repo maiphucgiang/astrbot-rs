@@ -11,6 +11,19 @@ use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
 use chrono::Utc;
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
+
+// Type alias for HMAC-SHA256
+type HmacSha256 = Hmac<Sha256>;
+
+/// Constant-time hex string comparison to prevent timing attacks
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
 
 // ---------------------------------------------------------------------------
 // Webhook shared state
@@ -58,12 +71,37 @@ async fn run_webhook_loop(
                         .or_else(|| payload.headers.get("X-Signature"))
                         .or_else(|| payload.headers.get("x-hub-signature-256"))
                         .or_else(|| payload.headers.get("X-Hub-Signature-256"));
-                    // In a real implementation, verify HMAC here
-                    if signature.is_none() {
-                        warn!("[Webhook] Missing signature, skipping");
-                        continue;
+
+                    match signature {
+                        Some(sig_header) => {
+                            // Parse expected signature: "sha256=<hex>" or raw hex
+                            let expected_hex = sig_header.strip_prefix("sha256=")
+                                .unwrap_or(sig_header);
+
+                            // Compute HMAC-SHA256 of the body
+                            let mut mac = match HmacSha256::new_from_slice(secret.as_bytes()) {
+                                Ok(m) => m,
+                                Err(e) => {
+                                    warn!("[Webhook] Failed to create HMAC: {}", e);
+                                    continue;
+                                }
+                            };
+                            mac.update(payload.body.as_bytes());
+                            let result = mac.finalize();
+                            let computed_hex = hex::encode(result.into_bytes());
+
+                            // Constant-time comparison to prevent timing attacks
+                            if !constant_time_eq(expected_hex, &computed_hex) {
+                                warn!("[Webhook] Signature mismatch, skipping");
+                                continue;
+                            }
+                            info!("[Webhook] Signature verified");
+                        }
+                        None => {
+                            warn!("[Webhook] Missing signature, skipping");
+                            continue;
+                        }
                     }
-                    info!("[Webhook] Signature header present (verification placeholder)");
                 }
 
                 // Parse the webhook body as JSON
