@@ -1,4 +1,5 @@
 use crate::errors::{AstrBotError, Result};
+use crate::provider::SttProvider;
 use async_trait::async_trait;
 use bytes::Bytes;
 use tracing::info;
@@ -121,5 +122,109 @@ impl SttEngine for OpenAiWhisper {
                 resp.status()
             )))
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SttProvider trait bridge
+// ---------------------------------------------------------------------------
+
+#[async_trait]
+impl SttProvider for OpenAiWhisper {
+    fn id(&self) -> &str {
+        "openai_whisper"
+    }
+    fn name(&self) -> &str {
+        "OpenAI Whisper"
+    }
+    async fn transcribe(&self, audio: Bytes) -> Result<String> {
+        SttEngine::transcribe(self, audio).await
+    }
+    async fn health_check(&self) -> Result<()> {
+        SttEngine::health_check(self).await
+    }
+    fn supported_formats(&self) -> Vec<String> {
+        vec!["wav".to_string(), "mp3".to_string(), "m4a".to_string(), "ogg".to_string()]
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SenseVoice STT implementation (local inference via subprocess)
+// ---------------------------------------------------------------------------
+
+pub struct SenseVoiceStt {
+    model_path: String,
+    python_path: String,
+}
+
+impl SenseVoiceStt {
+    pub fn new(model_path: String, python_path: String) -> Self {
+        Self { model_path, python_path }
+    }
+}
+
+#[async_trait]
+impl SttEngine for SenseVoiceStt {
+    async fn transcribe(&self, audio: Bytes) -> Result<String> {
+        info!("[SenseVoiceStt] transcribe — {} bytes", audio.len());
+        // Write audio to temp file
+        let temp_dir = std::env::temp_dir();
+        let temp_path = temp_dir.join(format!("sensevoice_{}.wav", uuid::Uuid::new_v4()));
+        tokio::fs::write(&temp_path, audio)
+            .await
+            .map_err(|e| AstrBotError::Internal(format!("Temp write: {}", e)))?;
+        // Spawn python process for inference
+        let output = tokio::process::Command::new(&self.python_path)
+            .arg("-c")
+            .arg(format!(
+                "from funasr import AutoModel; m=AutoModel(model='{}'); print(m.generate(input='{}'))",
+                self.model_path, temp_path.display()
+            ))
+            .output()
+            .await
+            .map_err(|e| AstrBotError::Internal(format!("SenseVoice subprocess: {}", e)))?;
+        // Cleanup
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(AstrBotError::Internal(format!("SenseVoice failed: {}", stderr)));
+        }
+        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if text.is_empty() {
+            return Err(AstrBotError::Internal("SenseVoice returned empty".to_string()));
+        }
+        Ok(text)
+    }
+    async fn health_check(&self) -> Result<()> {
+        let output = tokio::process::Command::new(&self.python_path)
+            .arg("-c")
+            .arg("import funasr; print('ok')")
+            .output()
+            .await
+            .map_err(|e| AstrBotError::Internal(format!("SenseVoice health: {}", e)))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(AstrBotError::Internal("SenseVoice dependency missing".to_string()))
+        }
+    }
+}
+
+#[async_trait]
+impl SttProvider for SenseVoiceStt {
+    fn id(&self) -> &str {
+        "sensevoice"
+    }
+    fn name(&self) -> &str {
+        "SenseVoice (Local)"
+    }
+    async fn transcribe(&self, audio: Bytes) -> Result<String> {
+        SttEngine::transcribe(self, audio).await
+    }
+    async fn health_check(&self) -> Result<()> {
+        SttEngine::health_check(self).await
+    }
+    fn supported_formats(&self) -> Vec<String> {
+        vec!["wav".to_string(), "mp3".to_string(), "pcm".to_string()]
     }
 }

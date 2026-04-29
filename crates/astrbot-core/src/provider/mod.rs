@@ -1,6 +1,33 @@
 use async_trait::async_trait;
+use bytes::Bytes;
 use futures_util::Stream;
 use crate::errors::Result;
+
+// ---------------------------------------------------------------------------
+// TTS Provider trait
+// ---------------------------------------------------------------------------
+
+#[async_trait]
+pub trait TtsProvider: Send + Sync {
+    fn id(&self) -> &str;
+    fn name(&self) -> &str;
+    async fn synthesize(&self, text: &str) -> Result<Bytes>;
+    async fn health_check(&self) -> Result<()>;
+    async fn voices(&self) -> Result<Vec<String>>;
+}
+
+// ---------------------------------------------------------------------------
+// STT Provider trait
+// ---------------------------------------------------------------------------
+
+#[async_trait]
+pub trait SttProvider: Send + Sync {
+    fn id(&self) -> &str;
+    fn name(&self) -> &str;
+    async fn transcribe(&self, audio: Bytes) -> Result<String>;
+    async fn health_check(&self) -> Result<()>;
+    fn supported_formats(&self) -> Vec<String>;
+}
 
 /// Trait for LLM providers
 #[async_trait]

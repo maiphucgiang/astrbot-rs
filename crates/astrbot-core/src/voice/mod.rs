@@ -6,8 +6,8 @@ pub mod stt;
 pub mod tts;
 pub mod sender;
 
-pub use stt::{OpenAiWhisper, SttEngine};
-pub use tts::{OpenAiTts, TtsEngine};
+pub use stt::{OpenAiWhisper, SenseVoiceStt, SttEngine};
+pub use tts::{OpenAiTts, AzureTts, EdgeTts, TtsEngine};
 
 // ---------------------------------------------------------------------------
 // Voice Registry
