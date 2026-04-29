@@ -4,6 +4,7 @@ use axum::{
     extract::{Path, State, Query},
     Json,
 };
+use astrbot_core::config::AstrBotConfig;
 use astrbot_persona::{PersonaManager, CustomPersonaRequest, ReplyStyle};
 use astrbot_provider::{ChatProvider, ChatMessage, ChatOptions, ProviderConfig};
 use serde_json::{json, Value};
@@ -15,8 +16,8 @@ use tokio::sync::RwLock;
 /// Dashboard 共享状态
 #[derive(Clone)]
 pub struct AppState {
-    /// 运行配置（可热重载）
-    pub config: Arc<RwLock<Value>>,
+    /// 运行配置（结构化，可热重载持久化）
+    pub config: Arc<RwLock<AstrBotConfig>>,
     /// 提供商列表
     pub providers: Arc<RwLock<Vec<Value>>>,
     /// 平台适配器列表
@@ -31,13 +32,15 @@ pub struct AppState {
     pub logs: Arc<RwLock<Vec<Value>>>,
     /// 系统启动时间
     pub start_time: std::time::Instant,
+    /// 配置文件路径
+    pub config_path: String,
 }
 
 impl AppState {
     pub fn new() -> Self {
         let persona_mgr = PersonaManager::new(Some("data/personas.db".to_string()));
         Self {
-            config: Arc::new(RwLock::new(json!({}))),
+            config: Arc::new(RwLock::new(AstrBotConfig::default())),
             providers: Arc::new(RwLock::new(vec![])),
             platforms: Arc::new(RwLock::new(vec![])),
             plugins: Arc::new(RwLock::new(vec![])),
@@ -45,13 +48,46 @@ impl AppState {
             sessions: Arc::new(RwLock::new(vec![])),
             logs: Arc::new(RwLock::new(vec![])),
             start_time: std::time::Instant::now(),
+            config_path: "data/config.json".to_string(),
         }
+    }
+
+    /// 从配置文件加载配置
+    pub async fn load_config(&self) -> anyhow::Result<()> {
+        let path = &self.config_path;
+        if tokio::fs::try_exists(path).await.unwrap_or(false) {
+            let config = AstrBotConfig::from_file(path).await?;
+            let mut cfg = self.config.write().await;
+            *cfg = config;
+        }
+        Ok(())
+    }
+
+    /// 保存配置到文件
+    pub async fn save_config(&self) -> anyhow::Result<()> {
+        let cfg = self.config.read().await;
+        AstrBotConfig::to_file(&*cfg, &self.config_path).await?;
+        Ok(())
+    }
+
+    /// 同步内存 providers 到配置并持久化
+    pub async fn sync_providers_and_save(&self) -> anyhow::Result<()> {
+        let providers = self.providers.read().await;
+        let mut cfg = self.config.write().await;
+        cfg.providers = providers.iter()
+            .filter_map(|v| serde_json::from_value(v.clone()).ok())
+            .collect();
+        drop(cfg);
+        self.save_config().await
     }
 }
 
 /// 启动 Dashboard Web 服务
 pub async fn start_server() {
     let state = AppState::new();
+    if let Err(e) = state.load_config().await {
+        tracing::warn!("Failed to load config: {}", e);
+    }
     let app = build_router(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 6185));
@@ -116,7 +152,7 @@ async fn get_status(State(state): State<AppState>) -> Json<Value> {
 }
 
 async fn get_detailed_status(State(state): State<AppState>) -> Json<Value> {
-    let config = state.config.read().await.clone();
+    let config = serde_json::to_value(&*state.config.read().await).unwrap_or_default();
     let providers = state.providers.read().await.clone();
     let platforms = state.platforms.read().await.clone();
     let plugins = state.plugins.read().await.clone();
@@ -147,16 +183,21 @@ async fn get_detailed_status(State(state): State<AppState>) -> Json<Value> {
 // ========== 配置 ==========
 
 async fn get_config(State(state): State<AppState>) -> Json<Value> {
-    Json(state.config.read().await.clone())
+    Json(serde_json::to_value(&*state.config.read().await).unwrap_or_default())
 }
 
 async fn update_config(
     State(state): State<AppState>,
     Json(body): Json<Value>,
 ) -> Json<Value> {
-    let mut cfg = state.config.write().await;
-    *cfg = body;
-    Json(json!({"success": true}))
+    match serde_json::from_value::<AstrBotConfig>(body) {
+        Ok(new_cfg) => {
+            let mut cfg = state.config.write().await;
+            *cfg = new_cfg;
+            Json(json!({"success": true}))
+        }
+        Err(e) => Json(json!({"success": false, "error": format!("Invalid config: {}", e)})),
+    }
 }
 
 async fn get_config_key(
@@ -164,7 +205,8 @@ async fn get_config_key(
     Path(key): Path<String>,
 ) -> Json<Value> {
     let cfg = state.config.read().await;
-    Json(cfg.get(&key).cloned().unwrap_or(Value::Null))
+    let cfg_val = serde_json::to_value(&*cfg).unwrap_or_default();
+    Json(cfg_val.get(&key).cloned().unwrap_or(Value::Null))
 }
 
 async fn update_config_key(
@@ -173,10 +215,17 @@ async fn update_config_key(
     Json(body): Json<Value>,
 ) -> Json<Value> {
     let mut cfg = state.config.write().await;
-    if let Some(obj) = cfg.as_object_mut() {
+    let mut cfg_val = serde_json::to_value(&*cfg).unwrap_or_default();
+    if let Some(obj) = cfg_val.as_object_mut() {
         obj.insert(key, body);
     }
-    Json(json!({"success": true}))
+    match serde_json::from_value::<AstrBotConfig>(cfg_val) {
+        Ok(new_cfg) => {
+            *cfg = new_cfg;
+            Json(json!({"success": true}))
+        }
+        Err(e) => Json(json!({"success": false, "error": format!("Invalid config: {}", e)})),
+    }
 }
 
 // ========== 提供商 ==========
@@ -669,16 +718,21 @@ async fn delete_message(
 // ========== 设置 ==========
 
 async fn list_settings(State(state): State<AppState>) -> Json<Value> {
-    Json(state.config.read().await.clone())
+    Json(serde_json::to_value(&*state.config.read().await).unwrap_or_default())
 }
 
 async fn update_settings(
     State(state): State<AppState>,
     Json(body): Json<Value>,
 ) -> Json<Value> {
-    let mut cfg = state.config.write().await;
-    *cfg = body;
-    Json(json!({"success": true}))
+    match serde_json::from_value::<AstrBotConfig>(body) {
+        Ok(new_cfg) => {
+            let mut cfg = state.config.write().await;
+            *cfg = new_cfg;
+            Json(json!({"success": true}))
+        }
+        Err(e) => Json(json!({"success": false, "error": format!("Invalid config: {}", e)})),
+    }
 }
 
 async fn get_setting(
@@ -686,7 +740,8 @@ async fn get_setting(
     Path(key): Path<String>,
 ) -> Json<Value> {
     let cfg = state.config.read().await;
-    Json(cfg.get(&key).cloned().unwrap_or(Value::Null))
+    let cfg_val = serde_json::to_value(&*cfg).unwrap_or_default();
+    Json(cfg_val.get(&key).cloned().unwrap_or(Value::Null))
 }
 
 async fn update_setting(
@@ -695,10 +750,17 @@ async fn update_setting(
     Json(body): Json<Value>,
 ) -> Json<Value> {
     let mut cfg = state.config.write().await;
-    if let Some(obj) = cfg.as_object_mut() {
+    let mut cfg_val = serde_json::to_value(&*cfg).unwrap_or_default();
+    if let Some(obj) = cfg_val.as_object_mut() {
         obj.insert(key, body);
     }
-    Json(json!({"success": true}))
+    match serde_json::from_value::<AstrBotConfig>(cfg_val) {
+        Ok(new_cfg) => {
+            *cfg = new_cfg;
+            Json(json!({"success": true}))
+        }
+        Err(e) => Json(json!({"success": false, "error": format!("Invalid config: {}", e)})),
+    }
 }
 
 // ========== 日志 ==========
