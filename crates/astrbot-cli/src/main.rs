@@ -102,13 +102,17 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Status { detailed } => {
+            let config_exists = std::path::Path::new("config.json").exists();
+            let status = if config_exists { "ready" } else { "not configured" };
             println!("AstrBot Status:");
             println!("  Version: {}", env!("CARGO_PKG_VERSION"));
-            println!("  Status: running");
+            println!("  Status: {}", status);
             if detailed {
-                println!("  Providers: 0 configured");
-                println!("  Platforms: 0 connected");
-                println!("  Plugins: 0 loaded");
+                println!("  Config: {}", if config_exists { "config.json found" } else { "no config.json" });
+                println!("  Dashboard: http://0.0.0.0:6185");
+            }
+            if !config_exists {
+                std::process::exit(1);
             }
         }
         Commands::Plugin { action } => {

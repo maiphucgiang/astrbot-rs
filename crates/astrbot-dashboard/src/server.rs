@@ -91,7 +91,7 @@ pub async fn start_server() {
     }
     let app = build_router(state);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 6185));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 6185));
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     tracing::info!("Dashboard listening on http://{}", addr);
     axum::serve(listener, app).await.unwrap();
