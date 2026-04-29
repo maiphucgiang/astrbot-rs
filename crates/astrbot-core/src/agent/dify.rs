@@ -936,7 +936,7 @@ mod tests {
         let chain = runner.parse_workflow_output(&data).await.unwrap();
         assert_eq!(chain.0.len(), 1);
         match &chain.0[0] {
-            MessageComponent::Plain(p) => assert_eq!(p.text, "Hello from workflow"),
+            MessageComponent::Plain { text } => assert_eq!(text, "Hello from workflow"),
             _ => panic!("Expected Plain component"),
         }
     }
@@ -959,7 +959,7 @@ mod tests {
         let chain = runner.parse_workflow_output(&data).await.unwrap();
         assert_eq!(chain.0.len(), 1);
         match &chain.0[0] {
-            MessageComponent::Image(img) => assert_eq!(img.url, Some("https://example.com/img.png".to_string())),
+            MessageComponent::Image { url, .. } => assert_eq!(*url, Some("https://example.com/img.png".to_string())),
             _ => panic!("Expected Image component"),
         }
     }

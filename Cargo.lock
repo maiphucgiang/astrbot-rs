@@ -146,6 +146,7 @@ name = "astrbot-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "astrbot-security",
  "async-trait",
  "axum",
  "base64",

@@ -2,10 +2,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Platform adapter types supported by AstrBot
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PlatformType {
     /// QQ Official Bot (Webhook)
+    #[default]
     QqOfficial,
     /// QQ via Aiocqhttp (OneBot 11)
     Aiocqhttp,
@@ -46,7 +47,7 @@ pub enum PlatformType {
 }
 
 /// Unique identifier for a message source
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct MessageSource {
     /// Platform type
     pub platform: PlatformType,
