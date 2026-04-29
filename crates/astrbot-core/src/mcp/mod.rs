@@ -122,14 +122,17 @@ pub trait McpTransport: Send + Sync {
 // Stdio transport — spawn subprocess, communicate via stdin/stdout
 // ---------------------------------------------------------------------------
 
+/// Shared state between the transport and the background reader task
+struct StdioShared {
+    pending: RwLock<HashMap<u64, oneshot::Sender<Result<McpResponse>>>>,
+    notification_tx: mpsc::UnboundedSender<McpResponse>,
+}
+
 pub struct StdioTransport {
     child: Child,
     stdin: ChildStdin,
-    reader: BufReader<ChildStdout>,
+    shared: Arc<StdioShared>,
     next_id: u64,
-    pending: RwLock<HashMap<u64, oneshot::Sender<Result<McpResponse>>>>,
-    notification_tx: mpsc::UnboundedSender<McpResponse>,
-    notification_rx: Option<mpsc::UnboundedReceiver<McpResponse>>,
 }
 
 impl StdioTransport {
@@ -148,29 +151,72 @@ impl StdioTransport {
             .ok_or_else(|| AstrBotError::Internal("Failed to get child stdout".to_string()))?;
 
         let reader = BufReader::new(stdout);
-        let (notification_tx, notification_rx) = mpsc::unbounded_channel();
+        let (notification_tx, _notification_rx) = mpsc::unbounded_channel();
 
-        let mut transport = Self {
+        let shared = Arc::new(StdioShared {
+            pending: RwLock::new(HashMap::new()),
+            notification_tx: notification_tx.clone(),
+        });
+
+        // Spawn background reader task
+        let shared_clone = Arc::clone(&shared);
+        tokio::spawn(async move {
+            Self::reader_loop(reader, shared_clone).await;
+        });
+
+        Ok(Self {
             child,
             stdin,
-            reader,
+            shared,
             next_id: 1,
-            pending: RwLock::new(HashMap::new()),
-            notification_tx,
-            notification_rx: Some(notification_rx),
-        };
-
-        // Start response reader task
-        transport.start_reader().await;
-
-        Ok(transport)
+        })
     }
 
-    async fn start_reader(&mut self) {
-        // Skeleton: full stdio reader requires Arc<Mutex<BufReader>> and a response loop.
-        // In production, spawn a task that reads lines from stdout and routes responses
-        // to pending oneshot channels by matching JSON-RPC IDs.
-        warn!("MCP stdio reader not fully implemented in skeleton");
+    /// Background task: read lines from stdout, parse responses, route to pending requests
+    async fn reader_loop(mut reader: BufReader<ChildStdout>, shared: Arc<StdioShared>) {
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line).await {
+                Ok(0) => {
+                    info!("MCP stdio reader: EOF reached, closing");
+                    break;
+                }
+                Ok(_) => {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    match serde_json::from_str::<McpResponse>(trimmed) {
+                        Ok(resp) => {
+                            let id = resp.id;
+                            if let Some(id) = id {
+                                let sender = {
+                                    let mut pending = shared.pending.write().await;
+                                    pending.remove(&id)
+                                };
+                                if let Some(tx) = sender {
+                                    let _ = tx.send(Ok(resp));
+                                } else {
+                                    // No pending request — could be a notification or late response
+                                    let _ = shared.notification_tx.send(resp);
+                                }
+                            } else {
+                                // Notification (no id)
+                                let _ = shared.notification_tx.send(resp);
+                            }
+                        }
+                        Err(e) => {
+                            warn!("MCP stdio reader: failed to parse line: {} | line: {}", e, trimmed);
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("MCP stdio reader: read error: {}", e);
+                    break;
+                }
+            }
+        }
     }
 }
 
@@ -182,6 +228,13 @@ impl McpTransport for StdioTransport {
             self.next_id += 1;
             id
         });
+
+        // Set up oneshot channel before sending request
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut pending = self.shared.pending.write().await;
+            pending.insert(id, tx);
+        }
 
         let json = serde_json::to_string(&req)
             .map_err(|e| AstrBotError::Serialization(format!("MCP serialize: {}", e)))?;
@@ -196,14 +249,17 @@ impl McpTransport for StdioTransport {
             .await
             .map_err(|e| AstrBotError::Network(format!("MCP stdio flush: {}", e)))?;
 
-        // In a real implementation, wait for matching response via channel
-        // For skeleton, return a placeholder
-        warn!("MCP stdio request/response loop not fully wired in skeleton");
-        Ok(McpResponse {
-            jsonrpc: "2.0".to_string(),
-            id: Some(id),
-            result_or_error: McpResultOrError::Result { result: Value::Null },
-        })
+        // Wait for response with timeout
+        match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(AstrBotError::Network("MCP response channel closed".to_string())),
+            Err(_) => {
+                // Timeout — clean up pending entry
+                let mut pending = self.shared.pending.write().await;
+                pending.remove(&id);
+                Err(AstrBotError::Network("MCP request timed out".to_string()))
+            }
+        }
     }
 
     async fn notify(&mut self, req: McpRequest) -> Result<()> {
@@ -428,8 +484,11 @@ impl McpClient {
 // MCP Server registry — manage multiple MCP servers
 // ---------------------------------------------------------------------------
 
+/// Arc-wrapped MCP client for registry usage (allows shared mutable access)
+pub type SharedMcpClient = Arc<RwLock<McpClient>>;
+
 pub struct McpServerRegistry {
-    servers: RwLock<HashMap<String, McpClient>>,
+    servers: RwLock<HashMap<String, SharedMcpClient>>,
 }
 
 impl Default for McpServerRegistry {
@@ -448,20 +507,21 @@ impl McpServerRegistry {
     /// Register a new MCP client
     pub async fn register(&self, name: impl Into<String>, client: McpClient) {
         let mut servers = self.servers.write().await;
-        servers.insert(name.into(), client);
+        servers.insert(name.into(), Arc::new(RwLock::new(client)));
     }
 
     /// Remove a server
     pub async fn unregister(&self, name: &str) -> Result<()> {
         let mut servers = self.servers.write().await;
-        if let Some(mut client) = servers.remove(name) {
-            client.close().await?;
+        if let Some(client) = servers.remove(name) {
+            let mut guard = client.write().await;
+            guard.close().await?;
         }
         Ok(())
     }
 
-    /// Get a client
-    pub async fn get(&self, name: &str) -> Option<McpClient> {
+    /// Get a shared client reference
+    pub async fn get(&self, name: &str) -> Option<SharedMcpClient> {
         let servers = self.servers.read().await;
         servers.get(name).cloned()
     }
@@ -478,20 +538,20 @@ impl McpServerRegistry {
         let mut all_tools = Vec::new();
 
         for (name, client) in servers.iter() {
-            // Note: This is a skeleton — real impl needs mutable access
-            // For now, skip since McpClient methods take &mut self
-            warn!("collect_all_tools needs mutable access — skeleton placeholder");
+            let mut guard = client.write().await;
+            match guard.list_tools().await {
+                Ok(tools) => {
+                    for tool in tools {
+                        all_tools.push((name.clone(), tool));
+                    }
+                }
+                Err(e) => {
+                    warn!("MCP server '{}' list_tools failed: {}", name, e);
+                }
+            }
         }
 
         Ok(all_tools)
-    }
-}
-
-// McpClient is not Clone because transport is not Clone
-// We implement a manual clone for the registry pattern (shallow, transport stays)
-impl Clone for McpClient {
-    fn clone(&self) -> Self {
-        panic!("McpClient cannot be cloned — transport is not cloneable. Use Arc<McpClient> instead.")
     }
 }
 
