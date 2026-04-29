@@ -39,6 +39,7 @@ ring = { workspace = true }
 tokio-tungstenite = { workspace = true }
 wasmi = { workspace = true }
 hex = { workspace = true }
+base64 = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4"

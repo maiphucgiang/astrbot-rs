@@ -529,7 +529,7 @@ mod tests {
         let extra = event.extra;
         let chain = KookAdapter::build_chain(&event.content, event.event_type, &extra);
         // Should contain image component
-        let components: Vec<_> = chain.components().collect();
+        let components: Vec<_> = chain.components().iter().collect();
         assert!(!components.is_empty());
     }
 

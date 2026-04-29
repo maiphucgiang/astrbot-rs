@@ -16,6 +16,9 @@ pub use tool_loop::*;
 mod coze;
 pub use coze::*;
 
+mod dify;
+pub use dify::*;
+
 /// Agent execution result
 #[derive(Debug, Clone)]
 pub enum AgentResult {
