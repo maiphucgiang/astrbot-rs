@@ -8,4 +8,6 @@ pub mod misskey;
 pub mod qq;
 pub mod telegram;
 pub mod wechat_personal;
+pub mod wecom;
+pub mod wecom_bot;
 pub mod framework;

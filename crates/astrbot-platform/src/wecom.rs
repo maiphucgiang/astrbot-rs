@@ -356,31 +356,31 @@ async fn wecom_callback_handler(
         let chain = WeComShared::parse_message_content(&text);
         let sender = MessageMember {
             user_id: "wecom_user".to_string(),
-            nickname: "WeCom".to_string(),
-            avatar: None,
+            nickname: Some("WeCom".to_string()),
+            card: None,
+            role: None,
+            is_self: false,
         };
         let message = AstrBotMessage {
             message_id: format!("wc_{}", timestamp),
+            timestamp: chrono::Utc::now(),
+            platform: PlatformType::Wecom,
+            session_id: "default".to_string(),
             sender,
-            timestamp: chrono::Utc::now().timestamp() as u64,
-            message_type: MessageType::Text,
-            raw_message: chain.clone(),
-            processed_message: None,
-            group_id: None,
-            is_at_me: true,
+            message_type: MessageType::Private,
+            chain,
+            raw_payload: None,
         };
         let handler_clone = Arc::clone(handler);
         tokio::spawn(async move {
-            if let Err(e) = handler_clone.on_message(message).await {
-                warn!("[WeCom] handler error: {}", e);
-            }
+            handler_clone.on_message(message).await;
         });
     }
-    
+
     (StatusCode::OK, "success".to_string())
 }
 
-fn decrypt_wecom_message(encoding_aes_key: &str, encrypt: &str, corp_id: &str) -> Result<String, String> {
+fn decrypt_wecom_message(encoding_aes_key: &str, encrypt: &str, corp_id: &str) -> std::result::Result<String, String> {
     let key = general_purpose::STANDARD
         .decode(encoding_aes_key)
         .map_err(|e| format!("base64 decode aes key failed: {}", e))?;

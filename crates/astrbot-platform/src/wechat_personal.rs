@@ -136,7 +136,7 @@ async fn wechat_webhook_handler(
     axum::Json(payload): axum::Json<WechatWebhookPayload>,
 ) -> StatusCode {
     if let Some(msg) = shared.parse_webhook_payload(payload) {
-        if let Some(ref handler) = shared.message_handler {
+        if let Some(handler) = shared.message_handler.clone() {
             let msg_clone = msg.clone();
             tokio::spawn(async move {
                 handler.on_message(msg_clone).await;
