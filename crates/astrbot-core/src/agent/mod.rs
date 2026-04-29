@@ -5,13 +5,16 @@ use std::collections::HashMap;
 use crate::errors::Result;
 use crate::message::MessageChain;
 use crate::platform::MessageSource;
-use crate::provider::{ChatConfig, ChatMessage, Provider};
+use crate::provider::{ChatMessage, ChatConfig, Provider};
 
 mod executors;
 pub use executors::*;
 
 mod tool_loop;
 pub use tool_loop::*;
+
+mod coze;
+pub use coze::*;
 
 /// Agent execution result
 #[derive(Debug, Clone)]
@@ -148,7 +151,11 @@ impl AgentRegistry {
     }
 
     /// Register an executor
-    pub fn register(&mut self, config: AgentConfig, executor: Box<dyn AgentExecutor>) {
+    pub fn register(
+        &mut self,
+        config: AgentConfig,
+        executor: Box<dyn AgentExecutor>,
+    ) {
         let id = config.id.clone();
         self.configs.insert(id.clone(), config);
         self.executors.insert(id, executor);
@@ -170,9 +177,9 @@ impl AgentRegistry {
     }
 
     /// Execute with a specific agent (single turn)
-    pub async fn execute(&self, id: &str, ctx: &AgentContext) -> Result<AgentResult> {
-        let executor = self
-            .get(id)
+    pub async fn execute(
+        &self, id: &str, ctx: &AgentContext) -> Result<AgentResult> {
+        let executor = self.get(id)
             .ok_or_else(|| crate::errors::AstrBotError::NotFound(format!("agent: {}", id)))?;
         executor.execute(ctx).await
     }
@@ -180,7 +187,8 @@ impl AgentRegistry {
     /// Execute with multi-turn tool calling loop
     /// If the agent is a ToolCallingAgentExecutor, this is already handled internally.
     /// For other executors, falls back to single-turn execute.
-    pub async fn execute_loop(&self, id: &str, ctx: &AgentContext) -> Result<AgentResult> {
+    pub async fn execute_loop(
+        &self, id: &str, ctx: &AgentContext) -> Result<AgentResult> {
         self.execute(id, ctx).await
     }
 
