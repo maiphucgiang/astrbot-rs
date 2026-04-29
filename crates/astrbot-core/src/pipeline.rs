@@ -1,465 +1,670 @@
-//! Message pipeline - orchestrates incoming messages → SessionManager → Provider → Reply
+//! Pipeline 9-Stage architecture — inspired by AstrBot Python
 //!
-//! Plugin integration: dispatches commands to PluginRegistry and events to plugins.
+//! Stage execution order:
+//! 1. WakingCheckStage      — wake prefix / @ mention / handler filter
+//! 2. WhitelistCheckStage   — id whitelist check
+//! 3. SessionStatusCheckStage — session enabled/disabled
+//! 4. RateLimitStage        — fixed-window rate limiting
+//! 5. ContentSafetyCheckStage — content safety (placeholder)
+//! 6. PreProcessStage       — STT / path mapping (placeholder)
+//! 7. ProcessStage           — core processing (Star handlers / LLM Agent)
+//! 8. ResultDecorateStage    — T2I / TTS / segmented reply (placeholder)
+//! 9. RespondStage           — send message
 
 use async_trait::async_trait;
-use crate::{
-    access::{AccessManager, AccessControl, RateLimitConfig},
-    db::Database,
-    errors::{AstrBotError, Result},
-    message::{AstrBotMessage, MessageChain, MessageComponent, MessageEventResult, MessageHandler},
-    platform::MessageSource,
-    provider::{ChatConfig, Provider},
-    session::SessionManager,
-};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use tracing::{error, info, warn};
+use std::time::{Duration, Instant};
+use tokio::sync::Mutex;
 
-/// Trait for sending replies back to platforms
-#[async_trait::async_trait]
-pub trait ReplySender: Send + Sync {
-    async fn send_reply(
-        &self, source: &MessageSource, chain: &MessageChain
-    ) -> Result<()>;
+use crate::errors::{AstrBotError, Result};
+use crate::message::{AstrBotMessage, MessageChain, MessageComponent, MessageType};
+
+// ---------------------------------------------------------------------------
+// PipelineContext
+// ---------------------------------------------------------------------------
+
+pub struct PipelineContext {
+    // TODO: astrbot_config, plugin_manager, conversation_manager
 }
 
-/// Trait for resolving plugin-registered commands
+impl PipelineContext {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl Default for PipelineContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// StageFlow — onion model support
+// ---------------------------------------------------------------------------
+
+pub enum StageFlow {
+    /// Normal coroutine — proceed to next stage after completion
+    Done,
+    /// Onion model — yield before/after recursive stage execution
+    Wrap,
+}
+
+// ---------------------------------------------------------------------------
+// Stage trait
+// ---------------------------------------------------------------------------
+
 #[async_trait]
-pub trait PluginCommandResolver: Send + Sync {
-    /// Try to handle a command via plugin registry
-    async fn resolve(
-        &self,
-        cmd: &str,
-        args: &[String],
-        source: &MessageSource,
-        user_id: &str,
-        is_admin: bool,
-    ) -> Option<Result<MessageEventResult>>;
-    /// Get plugin command list for /help
-    fn command_list(&self) -> Vec<(String, String, bool)>;
+pub trait Stage: Send + Sync {
+    async fn initialize(&mut self, ctx: &PipelineContext) -> Result<()>;
+
+    /// Process the event.
+    ///
+    /// Returns `Ok(StageFlow::Done)` — normal flow, continue to next stage.
+    /// Returns `Ok(StageFlow::Wrap)` — onion model, caller will recurse into
+    /// subsequent stages between pre/post yield points.
+    async fn process(&self, event: &mut PipelineEvent) -> Result<StageFlow>;
 }
 
-/// Context compression strategy
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ContextCompression {
-    /// No compression — send all messages
-    None,
-    /// Truncate by number of turns (keep most recent N)
-    TruncateByTurns { max_turns: usize },
-    /// Truncate by total token count (approximate)
-    TruncateByTokens { max_tokens: usize },
+// ---------------------------------------------------------------------------
+// PipelineEvent — mutable event state carried through all stages
+// ---------------------------------------------------------------------------
+
+pub struct PipelineEvent {
+    pub message: AstrBotMessage,
+    pub is_stopped: bool,
+    pub is_wake: bool,
+    pub is_at_or_wake_command: bool,
+    pub role: String, // "user" | "admin"
+    pub activated_handlers: Vec<String>, // TODO: StarHandlerMetadata
+    pub extras: HashMap<String, String>,
+    pub result_chain: Option<MessageChain>,
 }
 
-/// Configuration for the message pipeline
-#[derive(Debug, Clone)]
-pub struct PipelineConfig {
-    /// Bot nickname (used in system prompt)
-    pub nickname: String,
-    /// System prompt template
-    pub system_prompt: Option<String>,
-    /// Default chat config for LLM calls
-    pub chat_config: ChatConfig,
-    /// Whether to persist messages
-    pub persist_messages: bool,
-    /// Max context messages to send to LLM
-    pub max_context_messages: usize,
-    /// Command prefixes (e.g., ["/", "!"])
-    pub command_prefixes: Vec<String>,
-    /// Admin user IDs
-    pub admins: Vec<String>,
-    /// Rate limiting configuration
-    pub rate_limit: Option<RateLimitConfig>,
-    /// Access control (whitelist / blacklist)
-    pub access_control: Option<AccessControl>,
-    /// Context compression strategy
-    pub context_compression: ContextCompression,
-    /// Dequeue context length (reserve space for response)
-    pub dequeue_context_length: usize,
+impl PipelineEvent {
+    pub fn new(message: AstrBotMessage) -> Self {
+        Self {
+            message,
+            is_stopped: false,
+            is_wake: false,
+            is_at_or_wake_command: false,
+            role: "user".to_string(),
+            activated_handlers: vec![],
+            extras: HashMap::new(),
+            result_chain: None,
+        }
+    }
+
+    pub fn stop_event(&mut self) {
+        self.is_stopped = true;
+    }
+
+    pub fn is_stopped(&self) -> bool {
+        self.is_stopped
+    }
+
+    pub fn set_extra(&mut self, key: &str, value: String) {
+        self.extras.insert(key.to_string(), value);
+    }
+
+    pub fn get_extra(&self, key: &str) -> Option<&String> {
+        self.extras.get(key)
+    }
+
+    pub fn is_private_chat(&self) -> bool {
+        matches!(self.message.message_type, MessageType::Private)
+    }
+
+    pub fn is_group_chat(&self) -> bool {
+        matches!(self.message.message_type, MessageType::Group)
+    }
 }
 
-impl Default for PipelineConfig {
+// ---------------------------------------------------------------------------
+// StageRegistry — ordered stage collection
+// ---------------------------------------------------------------------------
+
+pub struct StageRegistry {
+    stages: Vec<(String, Box<dyn Stage>)>,
+    order: Vec<&'static str>,
+}
+
+impl StageRegistry {
+    pub fn new() -> Self {
+        Self {
+            stages: vec![],
+            order: vec![
+                "WakingCheckStage",
+                "WhitelistCheckStage",
+                "SessionStatusCheckStage",
+                "RateLimitStage",
+                "ContentSafetyCheckStage",
+                "PreProcessStage",
+                "ProcessStage",
+                "ResultDecorateStage",
+                "RespondStage",
+            ],
+        }
+    }
+
+    pub fn register(&mut self, name: &'static str, stage: Box<dyn Stage>) {
+        let pos = self.order.iter().position(|&o| o == name).unwrap_or(usize::MAX);
+        self.stages.push((name.to_string(), stage));
+        // Sort by declared order
+        self.stages.sort_by_key(|(name, _)| {
+            self.order.iter().position(|&o| o == name.as_str()).unwrap_or(usize::MAX)
+        });
+    }
+
+    pub async fn initialize_all(&mut self, ctx: &PipelineContext) -> Result<()> {
+        for (_name, stage) in &mut self.stages {
+            stage.initialize(ctx).await?;
+        }
+        Ok(())
+    }
+
+    pub fn len(&self) -> usize {
+        self.stages.len()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PipelineScheduler — onion-model recursive executor
+// ---------------------------------------------------------------------------
+
+pub struct PipelineScheduler {
+    ctx: Arc<PipelineContext>,
+    registry: StageRegistry,
+}
+
+impl PipelineScheduler {
+    pub fn new(ctx: Arc<PipelineContext>, registry: StageRegistry) -> Self {
+        Self { ctx, registry }
+    }
+
+    pub async fn execute(&self, event: &mut PipelineEvent) -> Result<()> {
+        self._process_stages(event, 0).await
+    }
+
+    async fn _process_stages(&self, event: &mut PipelineEvent, from_stage: usize) -> Result<()> {
+        for i in from_stage..self.registry.stages.len() {
+            let (name, stage) = &self.registry.stages[i];
+
+            let flow = stage.process(event).await?;
+
+            match flow {
+                StageFlow::Wrap => {
+                    // Onion model: pre-yield → recurse → post-yield
+                    // For now, simplified: recurse into subsequent stages
+                    if !event.is_stopped() {
+                        self._process_stages(event, i + 1).await?;
+                    }
+                }
+                StageFlow::Done => {
+                    // Normal flow, continue to next stage
+                }
+            }
+
+            if event.is_stopped() {
+                tracing::debug!("Stage {} stopped event propagation", name);
+                break;
+            }
+        }
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Stage Implementations
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// 1. WakingCheckStage
+// ---------------------------------------------------------------------------
+
+pub struct WakingCheckStage {
+    wake_prefixes: Vec<String>,
+    friend_needs_wake_prefix: bool,
+    ignore_bot_self_message: bool,
+    ignore_at_all: bool,
+    admins: Vec<String>,
+    unique_session: bool,
+    disable_builtin_commands: bool,
+}
+
+impl Default for WakingCheckStage {
     fn default() -> Self {
         Self {
-            nickname: "AstrBot".to_string(),
-            system_prompt: Some("You are a helpful assistant.".to_string()),
-            chat_config: ChatConfig::default(),
-            persist_messages: true,
-            max_context_messages: 20,
-            command_prefixes: vec!["/".to_string()],
-            admins: Vec::new(),
-            rate_limit: Some(RateLimitConfig::default()),
-            access_control: None,
-            context_compression: ContextCompression::TruncateByTurns { max_turns: 10 },
-            dequeue_context_length: 2048,
+            wake_prefixes: vec!["/".to_string()],
+            friend_needs_wake_prefix: false,
+            ignore_bot_self_message: false,
+            ignore_at_all: false,
+            admins: vec![],
+            unique_session: false,
+            disable_builtin_commands: false,
         }
     }
-}
-
-/// The central message pipeline that connects all components
-pub struct MessagePipeline {
-    config: PipelineConfig,
-    session_manager: SessionManager,
-    provider: Arc<dyn Provider>,
-    /// Map of platform type name → reply sender
-    reply_senders: dashmap::DashMap<String, Arc<dyn ReplySender>>,
-    /// Access manager (rate limit + whitelist)
-    access_manager: Option<AccessManager>,
-    /// Plugin command registry (optional — set by runtime)
-    command_resolver: Option<Arc<dyn PluginCommandResolver>>,
-}
-
-impl MessagePipeline {
-    /// Create a new message pipeline
-    pub fn new(
-        config: PipelineConfig,
-        database: Arc<Database>,
-        provider: Arc<dyn Provider>,
-    ) -> Self {
-        let session_manager = SessionManager::new(database)
-            .with_max_context(config.max_context_messages)
-            .with_persistence(config.persist_messages);
-
-        let access_manager = if config.rate_limit.is_some() || config.access_control.is_some() {
-            let rate = config.rate_limit.clone().unwrap_or_default();
-            let access = config.access_control.clone().unwrap_or_default();
-            Some(AccessManager::new(rate, access))
-        } else {
-            None
-        };
-
-        Self {
-            config,
-            session_manager,
-            provider,
-            reply_senders: dashmap::DashMap::new(),
-            access_manager,
-            command_resolver: None,
-        }
-    }
-
-    /// Set the plugin command resolver
-    pub fn set_command_resolver(&mut self, resolver: Arc<dyn PluginCommandResolver>) {
-        self.command_resolver = Some(resolver);
-    }
-
-    /// Register a reply sender for a platform type
-    pub fn register_sender(
-        &self, platform: String, sender: Arc<dyn ReplySender>,
-    ) {
-        self.reply_senders.insert(platform.clone(), sender);
-        info!("[Pipeline] Registered reply sender for: {}", platform);
-    }
-
-    /// Get the session manager
-    pub fn session_manager(&self) -> &SessionManager {
-        &self.session_manager
-    }
-
-    /// Build a MessageSource from an incoming message
-    fn build_source(message: &AstrBotMessage) -> MessageSource {
-        MessageSource {
-            platform: message.platform,
-            session_id: message.session_id.clone(),
-            message_id: message.message_id.clone(),
-            user_id: message.sender.user_id.clone(),
-        }
-    }
-
-    /// Apply context compression to messages
-    fn compress_context(
-        &self, messages: Vec<crate::provider::ChatMessage>,
-    ) -> Vec<crate::provider::ChatMessage> {
-        match self.config.context_compression {
-            ContextCompression::None => messages,
-            ContextCompression::TruncateByTurns { max_turns } => {
-                // Keep system prompt + last N user/assistant pairs
-                let system_msgs: Vec<_> = messages.iter()
-                    .filter(|m| m.role == "system")
-                    .cloned()
-                    .collect();
-                let other_msgs: Vec<_> = messages.iter()
-                    .filter(|m| m.role != "system")
-                    .cloned()
-                    .collect();
-
-                let keep_count = max_turns * 2; // Each turn = user + assistant
-                let start = other_msgs.len().saturating_sub(keep_count);
-                let kept = other_msgs[start..].to_vec();
-
-                let mut result = system_msgs;
-                result.extend(kept);
-                result
-            }
-            ContextCompression::TruncateByTokens { max_tokens } => {
-                let system_msgs: Vec<_> = messages.iter()
-                    .filter(|m| m.role == "system")
-                    .cloned()
-                    .collect();
-                let other_msgs: Vec<_> = messages.iter()
-                    .filter(|m| m.role != "system")
-                    .cloned()
-                    .collect();
-
-                let reserve = self.config.dequeue_context_length;
-                let budget = if max_tokens > reserve { max_tokens - reserve } else { max_tokens / 2 };
-
-                let mut estimated = system_msgs.iter()
-                    .map(|m| estimate_tokens(&m.content))
-                    .sum::<usize>();
-
-                let mut kept = Vec::new();
-                for msg in other_msgs.iter().rev() {
-                    let cost = estimate_tokens(&msg.content);
-                    if estimated + cost > budget && !kept.is_empty() {
-                        break;
-                    }
-                    estimated += cost;
-                    kept.push(msg.clone());
-                }
-                kept.reverse();
-
-                let mut result = system_msgs;
-                result.extend(kept);
-                result
-            }
-        }
-    }
-
-    /// Extract multimodal content (images, voice) from a message chain
-    pub fn extract_multimodal(chain: &MessageChain) -> Vec<String> {
-        let mut urls = Vec::new();
-        for component in chain.0.iter() {
-            match component {
-                MessageComponent::Image { url: Some(u), .. } => urls.push(format!("[Image: {}]", u)),
-                MessageComponent::Image { base64: Some(b), .. } => urls.push(format!("[Image: base64:{}]", b.chars().take(20).collect::<String>())),
-                MessageComponent::Voice { url: Some(u), .. } => urls.push(format!("[Voice: {}]", u)),
-                MessageComponent::Voice { base64: Some(b), .. } => urls.push(format!("[Voice: base64:{}]", b.chars().take(20).collect::<String>())),
-                _ => {}
-            }
-        }
-        urls
-    }
-
-    /// Process a single incoming message through the pipeline
-    async fn process_message(&self, message: &AstrBotMessage) -> Result<MessageEventResult> {
-        let source = Self::build_source(message);
-        let user_id = &message.sender.user_id;
-
-        // 1. Access control + rate limit check
-        if let Some(ref access) = self.access_manager {
-            if let Err(reason) = access.check(user_id).await {
-                warn!("[Pipeline] Access denied for {}: {}", user_id, reason);
-                return Ok(MessageEventResult::reply_text(
-                    format!("⚠️ {}", reason)
-                ));
-            }
-        }
-
-        // 2. Ensure session exists
-        self.session_manager.ensure_session(&source).await?;
-
-        // 3. Save user message (with multimodal content appended)
-        let mut user_content = message.chain.plain_text();
-        let multimodal = Self::extract_multimodal(&message.chain);
-        if !multimodal.is_empty() {
-            user_content.push_str("\n\n[Multimedia content]\n");
-            for item in multimodal {
-                user_content.push_str(&item);
-                user_content.push('\n');
-            }
-        }
-        self.session_manager.save_user_message(&source, &user_content).await?;
-
-        // 4. Check for built-in commands
-        let prefixes: Vec<char> = self.config.command_prefixes.iter()
-            .filter_map(|s| s.chars().next())
-            .collect();
-
-        if message.chain.is_command(&prefixes) {
-            if let Some((cmd, args)) = message.chain.parse_command(&prefixes) {
-                match self.handle_command(&cmd, &args, &source, user_id).await {
-                    Ok(result) => return Ok(result),
-                    Err(e) => {
-                        warn!("[Pipeline] Command error: {}", e);
-                        // Fall through to normal LLM processing
-                    }
-                }
-            }
-        }
-
-        // 5. Build context for LLM
-        let system_prompt = self.config.system_prompt.as_deref();
-        let context = self.session_manager.build_context(&source, system_prompt).await?;
-
-        // 6. Apply context compression
-        let compressed = self.compress_context(context);
-
-        // 7. Call LLM
-        let response = self.provider.chat(compressed, self.config.chat_config.clone()).await?;
-        let reply_text = response.content;
-
-        // 8. Save assistant message
-        let model = Some(response.model.as_str());
-        self.session_manager.save_assistant_message(&source, &reply_text, model).await?;
-
-        Ok(MessageEventResult::reply_text(reply_text))
-    }
-
-    /// Handle built-in commands + plugin commands
-    async fn handle_command(
-        &self,
-        cmd: &str,
-        args: &[String],
-        source: &MessageSource,
-        user_id: &str,
-    ) -> Result<MessageEventResult> {
-        let is_admin = self.config.admins.contains(&user_id.to_string());
-
-        // Try built-in commands first
-        let builtin = match cmd {
-            "sid" | "session" => {
-                Ok(MessageEventResult::reply_text(format!(
-                    "Session ID: {:?}_{}_{}\nUser ID: {}",
-                    source.platform, source.session_id, source.user_id, source.user_id
-                )))
-            }
-            "help" | "h" => {
-                let mut help_text = String::from(
-                    "Available commands:\n\
-                    /sid — Get session ID\n\
-                    /wl — Whitelist management (admin only)\n\
-                    /ping — Check if bot is alive\n\
-                    /help — Show this help"
-                );
-                // Append plugin commands
-                if let Some(ref resolver) = self.command_resolver {
-                    let plugin_cmds = resolver.command_list();
-                    if !plugin_cmds.is_empty() {
-                        help_text.push_str("\n\nPlugin commands:\n");
-                        for (name, desc, admin) in plugin_cmds {
-                            let marker = if admin { " [admin]" } else { "" };
-                            help_text.push_str(&format!("/{} — {}{}\n", name, desc, marker));
-                        }
-                    }
-                }
-                Ok(MessageEventResult::reply_text(help_text))
-            }
-            "ping" => Ok(MessageEventResult::reply_text("Pong!".to_string())),
-            "wl" | "whitelist" => {
-                if !is_admin {
-                    return Ok(MessageEventResult::reply_text(
-                        "⛔ Admin only command.".to_string()
-                    ));
-                }
-
-                if args.is_empty() {
-                    return Ok(MessageEventResult::reply_text(
-                        "Usage: /wl add <user_id> | /wl remove <user_id> | /wl list | /wl on | /wl off".to_string()
-                    ));
-                }
-
-                match args[0].as_str() {
-                    "add" => {
-                        if args.len() < 2 {
-                            return Ok(MessageEventResult::reply_text("Usage: /wl add <user_id>".to_string()));
-                        }
-                        Ok(MessageEventResult::reply_text(
-                            format!("📝 Requested to whitelist: {} (restart bot to apply)", args[1])
-                        ))
-                    }
-                    "remove" => {
-                        if args.len() < 2 {
-                            return Ok(MessageEventResult::reply_text("Usage: /wl remove <user_id>".to_string()));
-                        }
-                        Ok(MessageEventResult::reply_text(
-                            format!("📝 Requested to remove from whitelist: {} (restart bot to apply)", args[1])
-                        ))
-                    }
-                    "list" => {
-                        Ok(MessageEventResult::reply_text(
-                            "Whitelist: (view via config file or restart with /wl status)".to_string()
-                        ))
-                    }
-                    "on" => {
-                        Ok(MessageEventResult::reply_text("📝 Requested to enable whitelist mode (restart to apply)".to_string()))
-                    }
-                    "off" => {
-                        Ok(MessageEventResult::reply_text("📝 Requested to disable whitelist mode (restart to apply)".to_string()))
-                    }
-                    _ => {
-                        Ok(MessageEventResult::reply_text(
-                            "Unknown /wl subcommand. Use: add, remove, list, on, off".to_string()
-                        ))
-                    }
-                }
-            }
-            _ => Err(AstrBotError::NotFound(format!("Unknown command: {}", cmd))),
-        };
-
-        // If built-in handled it, return
-        if builtin.is_ok() {
-            return builtin;
-        }
-
-        // Try plugin commands
-        if let Some(ref resolver) = self.command_resolver {
-            if let Some(result) = resolver.resolve(cmd, args, source, user_id, is_admin).await {
-                return result;
-            }
-        }
-
-        builtin
-    }
-
-    /// Send a reply through the appropriate reply sender
-    async fn send_reply(&self, message: &AstrBotMessage, chain: &MessageChain) -> Result<()> {
-        let platform = format!("{:?}", message.platform).to_lowercase();
-
-        let sender = self.reply_senders.get(&platform)
-            .map(|entry| entry.value().clone());
-
-        if let Some(sender) = sender {
-            let source = Self::build_source(message);
-            sender.send_reply(&source, chain).await?;
-            Ok(())
-        } else {
-            Err(AstrBotError::Platform {
-                adapter: platform,
-                message: "No reply sender registered for this platform".to_string(),
-            })
-        }
-    }
-}
-
-/// Rough token estimation (CJK ≈ 1 char/token, English ≈ 1 word/1.3 tokens)
-fn estimate_tokens(text: &str) -> usize {
-    let cjk_count = text.chars().filter(|c| ('\u{4e00}'..='\u{9fff}').contains(c) || ('\u{3400}'..='\u{4dbf}').contains(c)).count();
-    let non_cjk = text.chars().filter(|c| c.is_alphabetic()).count();
-    let words = non_cjk / 5 + 1;
-    cjk_count + words * 2 / 3
 }
 
 #[async_trait]
-impl MessageHandler for MessagePipeline {
-    async fn on_message(&self, message: AstrBotMessage) {
-        match self.process_message(&message).await {
-            Ok(MessageEventResult::Reply { chain }) => {
-                if let Err(e) = self.send_reply(&message, &chain).await {
-                    error!("[Pipeline] Failed to send reply: {}", e);
-                }
-            }
-            Ok(MessageEventResult::Nothing) => {
-                // No reply needed
-            }
-            Ok(MessageEventResult::Forward { .. }) => {
-                warn!("[Pipeline] Forward not yet implemented");
-            }
-            Err(e) => {
-                error!("[Pipeline] Error processing message: {}", e);
-                // Try to send error message back
-                let error_chain = MessageChain::new().text(format!("Error: {}", e));
-                let _ = self.send_reply(&message, &error_chain).await;
+impl Stage for WakingCheckStage {
+    async fn initialize(&mut self, _ctx: &PipelineContext) -> Result<()> {
+        // TODO: load from astrbot_config
+        Ok(())
+    }
+
+    async fn process(&self, event: &mut PipelineEvent) -> Result<StageFlow> {
+        // 1. unique_session builder (platform-specific session id)
+        // TODO: platform-specific unique session id
+
+        // 2. ignore bot self message
+        // TODO: check if sender is self
+
+        // 3. Set sender role (admin check)
+        // TODO: check admins_id list
+
+        // 4. Check wake prefix / @ mention / private chat
+        let msg_str = event.message.chain.to_plain_text();
+        let mut is_wake = false;
+
+        for prefix in &self.wake_prefixes {
+            if msg_str.starts_with(prefix) {
+                is_wake = true;
+                event.is_wake = true;
+                event.is_at_or_wake_command = true;
+                break;
             }
         }
+
+        // Check @ mention (simplified)
+        for comp in &event.message.chain.components {
+            if let MessageComponent::At { user_id, .. } = comp {
+                // TODO: check if at self
+                if !self.ignore_at_all || user_id != "all" {
+                    is_wake = true;
+                    event.is_wake = true;
+                    event.is_at_or_wake_command = true;
+                }
+            }
+        }
+
+        // Private chat auto-wake
+        if event.is_private_chat() && !self.friend_needs_wake_prefix {
+            is_wake = true;
+            event.is_wake = true;
+            event.is_at_or_wake_command = true;
+        }
+
+        // 5. Check plugin handler filters (simplified)
+        // TODO: iterate star_handlers_registry, filter by event type + permissions
+        // TODO: SessionPluginManager.filter_handlers_by_session
+
+        // Set activated handlers
+        // event.set_extra("activated_handlers", ...);
+
+        if !is_wake {
+            event.stop_event();
+        }
+
+        Ok(StageFlow::Done)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 2. WhitelistCheckStage
+// ---------------------------------------------------------------------------
+
+pub struct WhitelistCheckStage {
+    enabled: bool,
+    whitelist: Vec<String>,
+    ignore_admin_on_group: bool,
+    ignore_admin_on_friend: bool,
+}
+
+impl Default for WhitelistCheckStage {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            whitelist: vec![],
+            ignore_admin_on_group: false,
+            ignore_admin_on_friend: false,
+        }
+    }
+}
+
+#[async_trait]
+impl Stage for WhitelistCheckStage {
+    async fn initialize(&mut self, _ctx: &PipelineContext) -> Result<()> {
+        // TODO: load from astrbot_config["platform_settings"]["enable_id_white_list"]
+        Ok(())
+    }
+
+    async fn process(&self, event: &mut PipelineEvent) -> Result<StageFlow> {
+        if !self.enabled || self.whitelist.is_empty() {
+            return Ok(StageFlow::Done);
+        }
+
+        // TODO: webchat exempt
+
+        // Admin exempt
+        if event.role == "admin" {
+            if self.ignore_admin_on_group && event.is_group_chat() {
+                return Ok(StageFlow::Done);
+            }
+            if self.ignore_admin_on_friend && event.is_private_chat() {
+                return Ok(StageFlow::Done);
+            }
+        }
+
+        // Check whitelist
+        let session_id = &event.message.session_id;
+        // TODO: get group_id from message
+        let in_whitelist = self.whitelist.iter().any(|id| id == session_id);
+
+        if !in_whitelist {
+            event.stop_event();
+        }
+
+        Ok(StageFlow::Done)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 3. SessionStatusCheckStage
+// ---------------------------------------------------------------------------
+
+pub struct SessionStatusCheckStage;
+
+#[async_trait]
+impl Stage for SessionStatusCheckStage {
+    async fn initialize(&mut self, _ctx: &PipelineContext) -> Result<()> {
+        Ok(())
+    }
+
+    async fn process(&self, event: &mut PipelineEvent) -> Result<StageFlow> {
+        // TODO: check SessionServiceManager.is_session_enabled(session_id)
+        // For now, always enabled
+        Ok(StageFlow::Done)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 4. RateLimitStage — Fixed Window
+// ---------------------------------------------------------------------------
+
+pub struct RateLimitStage {
+    rate_limit_count: usize,
+    rate_limit_time: Duration,
+    strategy: RateLimitStrategy,
+    timestamps: Arc<Mutex<HashMap<String, VecDeque<Instant>>>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RateLimitStrategy {
+    Stall,
+    Discard,
+}
+
+impl Default for RateLimitStage {
+    fn default() -> Self {
+        Self {
+            rate_limit_count: 0,
+            rate_limit_time: Duration::from_secs(0),
+            strategy: RateLimitStrategy::Stall,
+            timestamps: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+}
+
+#[async_trait]
+impl Stage for RateLimitStage {
+    async fn initialize(&mut self, _ctx: &PipelineContext) -> Result<()> {
+        // TODO: load from config
+        Ok(())
+    }
+
+    async fn process(&self, event: &mut PipelineEvent) -> Result<StageFlow> {
+        if self.rate_limit_count == 0 {
+            return Ok(StageFlow::Done);
+        }
+
+        let session_id = event.message.session_id.clone();
+        let now = Instant::now();
+
+        let mut map = self.timestamps.lock().await;
+        let timestamps = map.entry(session_id.clone()).or_insert_with(VecDeque::new);
+
+        // Remove expired timestamps
+        let threshold = now - self.rate_limit_time;
+        while let Some(&first) = timestamps.front() {
+            if first < threshold {
+                timestamps.pop_front();
+            } else {
+                break;
+            }
+        }
+
+        if timestamps.len() < self.rate_limit_count {
+            timestamps.push_back(now);
+            return Ok(StageFlow::Done);
+        }
+
+        // Rate limit triggered
+        match self.strategy {
+            RateLimitStrategy::Stall => {
+                let next_window = timestamps.front().unwrap() + self.rate_limit_time;
+                let stall_duration = next_window.saturating_duration_since(now) + Duration::from_millis(300);
+                tracing::info!(
+                    "Session {} rate limited, stalling for {:.2}s",
+                    session_id,
+                    stall_duration.as_secs_f64()
+                );
+                tokio::time::sleep(stall_duration).await;
+                timestamps.push_back(Instant::now());
+            }
+            RateLimitStrategy::Discard => {
+                tracing::info!("Session {} rate limited, discarding request", session_id);
+                event.stop_event();
+            }
+        }
+
+        Ok(StageFlow::Done)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 5. ContentSafetyCheckStage — stub
+// ---------------------------------------------------------------------------
+
+pub struct ContentSafetyCheckStage;
+
+#[async_trait]
+impl Stage for ContentSafetyCheckStage {
+    async fn initialize(&mut self, _ctx: &PipelineContext) -> Result<()> {
+        Ok(())
+    }
+
+    async fn process(&self, _event: &mut PipelineEvent) -> Result<StageFlow> {
+        // TODO: StrategySelector.check(text) — Baidu / local
+        // Onion model for pre/post check
+        Ok(StageFlow::Wrap)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 6. PreProcessStage — stub
+// ---------------------------------------------------------------------------
+
+pub struct PreProcessStage;
+
+#[async_trait]
+impl Stage for PreProcessStage {
+    async fn initialize(&mut self, _ctx: &PipelineContext) -> Result<()> {
+        Ok(())
+    }
+
+    async fn process(&self, _event: &mut PipelineEvent) -> Result<StageFlow> {
+        // TODO: STT, path mapping, pre_ack_emoji
+        Ok(StageFlow::Done)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 7. ProcessStage — core processing (Star handlers / LLM)
+// ---------------------------------------------------------------------------
+
+pub struct ProcessStage;
+
+#[async_trait]
+impl Stage for ProcessStage {
+    async fn initialize(&mut self, _ctx: &PipelineContext) -> Result<()> {
+        // TODO: init AgentRequestSubStage + StarRequestSubStage
+        Ok(())
+    }
+
+    async fn process(&self, event: &mut PipelineEvent) -> Result<StageFlow> {
+        // TODO:
+        // 1. Check activated_handlers → StarRequestSubStage
+        // 2. No handlers or LLM fallback → AgentRequestSubStage
+        // Onion model for pre/post LLM calls
+
+        if event.is_at_or_wake_command && !event.is_stopped() {
+            // Placeholder: simulate LLM response
+            // event.result_chain = Some(MessageChain::from_plain("Hello from ProcessStage"));
+        }
+
+        Ok(StageFlow::Wrap)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 8. ResultDecorateStage — stub
+// ---------------------------------------------------------------------------
+
+pub struct ResultDecorateStage;
+
+#[async_trait]
+impl Stage for ResultDecorateStage {
+    async fn initialize(&mut self, _ctx: &PipelineContext) -> Result<()> {
+        Ok(())
+    }
+
+    async fn process(&self, _event: &mut PipelineEvent) -> Result<StageFlow> {
+        // TODO: reply_prefix, T2I, TTS, segmented_reply, mention/quote
+        Ok(StageFlow::Done)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 9. RespondStage
+// ---------------------------------------------------------------------------
+
+pub struct RespondStage;
+
+#[async_trait]
+impl Stage for RespondStage {
+    async fn initialize(&mut self, _ctx: &PipelineContext) -> Result<()> {
+        Ok(())
+    }
+
+    async fn process(&self, _event: &mut PipelineEvent) -> Result<StageFlow> {
+        // TODO:
+        // 1. Check empty message chain
+        // 2. Streaming: send_streaming()
+        // 3. Segmented reply: calculate intervals, send segment by segment
+        // 4. Record/Video: send separately
+        // 5. OnAfterMessageSentEvent hook
+        // 6. clear_result()
+        Ok(StageFlow::Done)
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_pipeline_scheduler_execution() {
+        let ctx = Arc::new(PipelineContext::new());
+        let mut registry = StageRegistry::new();
+
+        registry.register("WakingCheckStage", Box::new(WakingCheckStage::default()));
+        registry.register("WhitelistCheckStage", Box::new(WhitelistCheckStage::default()));
+        registry.register("RateLimitStage", Box::new(RateLimitStage::default()));
+        registry.register("ProcessStage", Box::new(ProcessStage));
+        registry.register("RespondStage", Box::new(RespondStage));
+
+        registry.initialize_all(&ctx).await.unwrap();
+
+        let scheduler = PipelineScheduler::new(ctx, registry);
+
+        let message = AstrBotMessage::default();
+        let mut event = PipelineEvent::new(message);
+
+        scheduler.execute(&mut event).await.unwrap();
+
+        // WakingCheckStage 默认 wake_prefix="/"，空消息不会唤醒，会被 stop
+        assert!(event.is_stopped());
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_stall() {
+        let ctx = Arc::new(PipelineContext::new());
+        let mut registry = StageRegistry::new();
+
+        let mut rate_limit = RateLimitStage::default();
+        rate_limit.rate_limit_count = 1;
+        rate_limit.rate_limit_time = Duration::from_secs(1);
+        rate_limit.strategy = RateLimitStrategy::Stall;
+
+        registry.register("RateLimitStage", Box::new(rate_limit));
+
+        registry.initialize_all(&ctx).await.unwrap();
+        let scheduler = PipelineScheduler::new(ctx, registry);
+
+        let message = AstrBotMessage::default();
+        let mut event = PipelineEvent::new(message);
+
+        let start = Instant::now();
+        scheduler.execute(&mut event).await.unwrap();
+        let elapsed = start.elapsed();
+
+        // First request passes immediately
+        assert!(!event.is_stopped());
+        assert!(elapsed < Duration::from_millis(100));
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_discard() {
+        let ctx = Arc::new(PipelineContext::new());
+        let mut registry = StageRegistry::new();
+
+        let mut rate_limit = RateLimitStage::default();
+        rate_limit.rate_limit_count = 1;
+        rate_limit.rate_limit_time = Duration::from_secs(10);
+        rate_limit.strategy = RateLimitStrategy::Discard;
+
+        registry.register("RateLimitStage", Box::new(rate_limit));
+
+        registry.initialize_all(&ctx).await.unwrap();
+        let scheduler = PipelineScheduler::new(ctx, registry);
+
+        let message = AstrBotMessage::default();
+        let mut event = PipelineEvent::new(message);
+
+        // First request passes
+        scheduler.execute(&mut event).await.unwrap();
+        assert!(!event.is_stopped());
+
+        // Second request discarded
+        let message2 = AstrBotMessage::default();
+        let mut event2 = PipelineEvent::new(message2);
+        scheduler.execute(&mut event2).await.unwrap();
+        assert!(event2.is_stopped());
     }
 }
