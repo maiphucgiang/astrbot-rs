@@ -179,14 +179,130 @@ impl WasmPluginInstance {
         Ok(())
     }
 
-    /// 调用导出的 `on_message` 函数（如果存在）
-    /// 骨架版本：接受 (i32, i32) 返回 i32，对应 WASM 内存中的字符串指针/长度
-    pub fn call_on_message(&mut self, _msg: &str) -> Result<String> {
-        // 完整实现需要 malloc/free 导出 + 内存读写
-        // 骨架阶段返回占位错误
-        Err(AstrBotError::Plugin {
+    /// 调用导出的 `on_message` 函数
+    ///
+    /// WASM 接口约定：
+    /// - `on_message(ptr: i32, len: i32) -> i32`
+    ///   ptr/len 指向输入 JSON 字符串的内存位置，返回值是指向输出 JSON 字符串的指针
+    /// - `memory` export 提供线性内存访问
+    /// - 输出字符串以 null 结尾（C-style），宿主读取到 \0 为止
+    /// - 燃料计量与内存限制在调用前后检查
+    pub fn call_on_message(&mut self, msg: &str) -> Result<String> {
+        // 1. 获取 memory export
+        let memory = self
+            .instance
+            .get_memory(&self.store, "memory")
+            .ok_or_else(|| AstrBotError::Plugin {
+                plugin: "wasm".to_string(),
+                message: "WASM module has no 'memory' export".to_string(),
+            })?;
+
+        // 2. 检查内存限制
+        let mem_size = memory.data(&self.store).len();
+        let max_mem = self.store.data().max_memory;
+        if mem_size > max_mem {
+            return Err(AstrBotError::Plugin {
+                plugin: "wasm".to_string(),
+                message: format!("memory size {} exceeds limit {}", mem_size, max_mem),
+            });
+        }
+
+        // 3. 燃料计量：调用前记录（wasmi 0.31 fuel 需通过 consume_fuel 使用）
+        let fuel_before = self.store.consume_fuel(0).unwrap_or(0);
+
+        // 4. 将输入消息写入 WASM 内存（offset 1024，避开栈/数据段）
+        let msg_bytes = msg.as_bytes();
+        let input_offset: i32 = 1024;
+        let input_len = msg_bytes.len() as i32;
+
+        let required = (input_offset as usize) + msg_bytes.len();
+        let mem_data_len = memory.data(&self.store).len();
+        if required > mem_data_len {
+            let pages_needed = ((required - mem_data_len) + 65535) / 65536;
+            let pages = wasmi::core::Pages::new(pages_needed as u32)
+                .unwrap_or(wasmi::core::Pages::from(0));
+            memory
+                .grow(&mut self.store, pages)
+                .map_err(|e| AstrBotError::Plugin {
+                    plugin: "wasm".to_string(),
+                    message: format!("memory grow failed: {}", e),
+                })?;
+        }
+
+        memory
+            .write(&mut self.store, input_offset as usize, msg_bytes)
+            .map_err(|e| AstrBotError::Plugin {
+                plugin: "wasm".to_string(),
+                message: format!("memory write failed: {}", e),
+            })?;
+
+        // 更新内存使用统计
+        let current_usage = self.store.data().memory_usage.load(Ordering::Relaxed);
+        let new_usage = required.max(current_usage);
+        self.store
+            .data()
+            .memory_usage
+            .store(new_usage, Ordering::Relaxed);
+
+        // 5. 获取 on_message 导出函数 (i32, i32) -> i32
+        let on_message = self
+            .instance
+            .get_typed_func::<(i32, i32), i32>(&self.store, "on_message")
+            .map_err(|e| AstrBotError::Plugin {
+                plugin: "wasm".to_string(),
+                message: format!("on_message export not found: {}", e),
+            })?;
+
+        // 6. 调用 WASM 函数
+        let result_ptr = on_message
+            .call(&mut self.store, (input_offset, input_len))
+            .map_err(|e| AstrBotError::Plugin {
+                plugin: "wasm".to_string(),
+                message: format!("on_message call failed: {}", e),
+            })?;
+
+        // 7. 燃料计量：调用后检查
+        let fuel_after = self.store.consume_fuel(0).unwrap_or(0);
+        let fuel_used = fuel_before.saturating_sub(fuel_after);
+        let fuel_budget = self.store.data().fuel_budget;
+        if fuel_used > fuel_budget {
+            return Err(AstrBotError::Plugin {
+                plugin: "wasm".to_string(),
+                message: format!(
+                    "fuel exhausted: used {} > budget {}",
+                    fuel_used, fuel_budget
+                ),
+            });
+        }
+
+        // 8. 从返回值指针读取结果（null-terminated，最多 64KB）
+        let result_offset = result_ptr as usize;
+        let mem_data = memory.data(&self.store);
+
+        if result_offset >= mem_data.len() {
+            return Err(AstrBotError::Plugin {
+                plugin: "wasm".to_string(),
+                message: format!("result pointer {} out of bounds", result_offset),
+            });
+        }
+
+        let mut result_bytes = Vec::new();
+        let max_result_len = 64 * 1024;
+        for i in 0..max_result_len {
+            let idx = result_offset + i;
+            if idx >= mem_data.len() {
+                break;
+            }
+            let b = mem_data[idx];
+            if b == 0 {
+                break;
+            }
+            result_bytes.push(b);
+        }
+
+        String::from_utf8(result_bytes).map_err(|e| AstrBotError::Plugin {
             plugin: "wasm".to_string(),
-            message: "call_on_message skeleton — needs malloc/free exports and memory helpers".to_string(),
+            message: format!("result is not valid UTF-8: {}", e),
         })
     }
 }
@@ -285,5 +401,19 @@ mod tests {
         assert_eq!(registry.list().len(), 1);
         assert!(registry.unregister("reg_test"));
         assert!(!registry.unregister("reg_test"));
+    }
+
+    #[tokio::test]
+    async fn test_wasm_call_on_message_no_exports() {
+        let loader = WasmPluginLoader::new().unwrap();
+        let plugin = loader
+            .load_from_bytes(MINIMAL_WASM, "test_no_exports", "0.0.1")
+            .await
+            .unwrap();
+        let mut instance = WasmPluginInstance::new(&plugin, &loader).unwrap();
+
+        // MINIMAL_WASM has no memory or on_message export
+        let result = instance.call_on_message(r#"{"text":"hello"}"#);
+        assert!(result.is_err());
     }
 }
