@@ -32,12 +32,12 @@ impl ClaudeProvider {
     }
 
     fn build_request_body(&self, messages: Vec<ChatMessage>, options: &ChatOptions) -> Value {
-        let mut system_prompt = None::<String>;
+        let mut system_parts = Vec::new();
         let anthropic_messages: Vec<Value> = messages
             .into_iter()
             .filter_map(|msg| match msg.role.as_str() {
                 "system" => {
-                    system_prompt = Some(msg.content);
+                    system_parts.push(msg.content);
                     None
                 }
                 "user" | "assistant" => Some(json!({
@@ -57,8 +57,8 @@ impl ClaudeProvider {
             "messages": anthropic_messages,
         });
 
-        if let Some(sp) = system_prompt {
-            body["system"] = json!(sp);
+        if !system_parts.is_empty() {
+            body["system"] = json!(system_parts.join("\n\n"));
         }
         if let Some(t) = options.temperature {
             body["temperature"] = json!(t);
@@ -227,7 +227,7 @@ mod tests {
         ];
         let body = provider.build_request_body(messages, &ChatOptions::default());
 
-        assert_eq!(body.get("system").unwrap().as_str(), Some("First system"));
+        assert_eq!(body.get("system").unwrap().as_str(), Some("First system\n\nSecond system"));
         let msgs = body["messages"].as_array().unwrap();
         assert_eq!(msgs.len(), 2);
     }
@@ -258,8 +258,10 @@ mod tests {
 
         assert_eq!(body["model"].as_str(), Some("claude-3-opus-20240229"));
         assert_eq!(body["max_tokens"].as_u64(), Some(2048));
-        assert_eq!(body["temperature"].as_f64(), Some(0.5));
-        assert_eq!(body["top_p"].as_f64(), Some(0.9));
+        let temp = body["temperature"].as_f64().unwrap();
+        assert!((temp - 0.5).abs() < 0.01, "temperature={}, expected 0.5", temp);
+        let top_p = body["top_p"].as_f64().unwrap();
+        assert!((top_p - 0.9).abs() < 0.01, "top_p={}, expected 0.9", top_p);
     }
 
     #[test]

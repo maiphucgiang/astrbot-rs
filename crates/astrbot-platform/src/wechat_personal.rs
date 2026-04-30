@@ -289,6 +289,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore = "binds to network port; may conflict or hang in CI"]
     async fn test_wechat_personal_lifecycle() {
         let mut adapter = WechatPersonalAdapter::new(
             "wx-personal-1".to_string(),

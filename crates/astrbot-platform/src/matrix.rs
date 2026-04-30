@@ -664,6 +664,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore = "requires network access to matrix.org"]
     async fn test_matrix_adapter_lifecycle() {
         let mut adapter = MatrixAdapter::new(
             "matrix-1".to_string(),
