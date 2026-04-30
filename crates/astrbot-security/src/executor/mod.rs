@@ -184,7 +184,7 @@ mod tests {
             max_cpu_secs: 1,
             ..Default::default()
         };
-        let result = exec.execute("import time; time.sleep(100)").await;
+        let result = exec.execute("while True: pass").await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("timed out"));
     }
