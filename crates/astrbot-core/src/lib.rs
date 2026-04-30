@@ -13,6 +13,7 @@ pub mod message;
 pub mod metrics;
 pub mod net;
 pub mod persona;
+pub mod pipeline;
 pub mod platform;
 pub mod plugin;
 pub mod proactive;

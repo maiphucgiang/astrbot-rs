@@ -16,9 +16,16 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
+use tracing::{info, warn, debug};
 
 use crate::errors::{AstrBotError, Result};
 use crate::message::{AstrBotMessage, MessageChain, MessageComponent, MessageType};
+
+pub mod process;
+pub mod respond;
+
+pub use process::ProcessStage;
+pub use respond::RespondStage;
 
 // ---------------------------------------------------------------------------
 // PipelineContext
@@ -184,11 +191,7 @@ impl PipelineScheduler {
     }
 
     pub async fn execute(&self, event: &mut PipelineEvent) -> Result<()> {
-        self._process_stages(event, 0).await
-    }
-
-    async fn _process_stages(&self, event: &mut PipelineEvent, from_stage: usize) -> Result<()> {
-        for i in from_stage..self.registry.stages.len() {
+        for i in 0..self.registry.stages.len() {
             let (name, stage) = &self.registry.stages[i];
 
             let flow = stage.process(event).await?;
@@ -196,10 +199,8 @@ impl PipelineScheduler {
             match flow {
                 StageFlow::Wrap => {
                     // Onion model: pre-yield → recurse → post-yield
-                    // For now, simplified: recurse into subsequent stages
-                    if !event.is_stopped() {
-                        self._process_stages(event, i + 1).await?;
-                    }
+                    // TODO: implement post-processing after subsequent stages
+                    // For now, simplified: continue to next stage
                 }
                 StageFlow::Done => {
                     // Normal flow, continue to next stage
@@ -265,7 +266,7 @@ impl Stage for WakingCheckStage {
         // TODO: check admins_id list
 
         // 4. Check wake prefix / @ mention / private chat
-        let msg_str = event.message.chain.to_plain_text();
+        let msg_str = event.message.chain.plain_text();
         let mut is_wake = false;
 
         for prefix in &self.wake_prefixes {
@@ -278,10 +279,10 @@ impl Stage for WakingCheckStage {
         }
 
         // Check @ mention (simplified)
-        for comp in &event.message.chain.components {
-            if let MessageComponent::At { user_id, .. } = comp {
+        for comp in event.message.chain.components() {
+            if let MessageComponent::At { target, .. } = comp {
                 // TODO: check if at self
-                if !self.ignore_at_all || user_id != "all" {
+                if !self.ignore_at_all || target != "all" {
                     is_wake = true;
                     event.is_wake = true;
                     event.is_at_or_wake_command = true;
@@ -453,7 +454,7 @@ impl Stage for RateLimitStage {
         // Rate limit triggered
         match self.strategy {
             RateLimitStrategy::Stall => {
-                let next_window = timestamps.front().unwrap() + self.rate_limit_time;
+                let next_window = *timestamps.front().unwrap() + self.rate_limit_time;
                 let stall_duration = next_window.saturating_duration_since(now) + Duration::from_millis(300);
                 tracing::info!(
                     "Session {} rate limited, stalling for {:.2}s",
@@ -559,32 +560,10 @@ impl Stage for PreProcessStage {
 }
 
 // ---------------------------------------------------------------------------
-// 7. ProcessStage — core processing (Star handlers / LLM)
+// 7. ProcessStage — re-export from process.rs
 // ---------------------------------------------------------------------------
 
-pub struct ProcessStage;
-
-#[async_trait]
-impl Stage for ProcessStage {
-    async fn initialize(&mut self, _ctx: &PipelineContext) -> Result<()> {
-        // TODO: init AgentRequestSubStage + StarRequestSubStage
-        Ok(())
-    }
-
-    async fn process(&self, event: &mut PipelineEvent) -> Result<StageFlow> {
-        // TODO:
-        // 1. Check activated_handlers → StarRequestSubStage
-        // 2. No handlers or LLM fallback → AgentRequestSubStage
-        // Onion model for pre/post LLM calls
-
-        if event.is_at_or_wake_command && !event.is_stopped() {
-            // Placeholder: simulate LLM response
-            // event.result_chain = Some(MessageChain::from_plain("Hello from ProcessStage"));
-        }
-
-        Ok(StageFlow::Wrap)
-    }
-}
+// Real implementation in pipeline/process.rs
 
 // ---------------------------------------------------------------------------
 // 8. ResultDecorateStage — stub
@@ -605,28 +584,10 @@ impl Stage for ResultDecorateStage {
 }
 
 // ---------------------------------------------------------------------------
-// 9. RespondStage
+// 9. RespondStage — re-export from respond.rs
 // ---------------------------------------------------------------------------
 
-pub struct RespondStage;
-
-#[async_trait]
-impl Stage for RespondStage {
-    async fn initialize(&mut self, _ctx: &PipelineContext) -> Result<()> {
-        Ok(())
-    }
-
-    async fn process(&self, _event: &mut PipelineEvent) -> Result<StageFlow> {
-        // TODO:
-        // 1. Check empty message chain
-        // 2. Streaming: send_streaming()
-        // 3. Segmented reply: calculate intervals, send segment by segment
-        // 4. Record/Video: send separately
-        // 5. OnAfterMessageSentEvent hook
-        // 6. clear_result()
-        Ok(StageFlow::Done)
-    }
-}
+// Real implementation in pipeline/respond.rs
 
 // =============================================================================
 // Tests
@@ -644,8 +605,8 @@ mod tests {
         registry.register("WakingCheckStage", Box::new(WakingCheckStage::default()));
         registry.register("WhitelistCheckStage", Box::new(WhitelistCheckStage::default()));
         registry.register("RateLimitStage", Box::new(RateLimitStage::default()));
-        registry.register("ProcessStage", Box::new(ProcessStage));
-        registry.register("RespondStage", Box::new(RespondStage));
+        registry.register("ProcessStage", Box::new(ProcessStage::new()));
+        registry.register("RespondStage", Box::new(RespondStage::new()));
 
         registry.initialize_all(&ctx).await.unwrap();
 

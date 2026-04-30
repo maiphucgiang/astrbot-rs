@@ -10,8 +10,6 @@
 //! - [`MockPlatformAdapter`] — in-memory platform adapter using tokio mpsc channels
 //! - [`MockMessageHandler`] — message handler that captures all received messages
 
-pub mod pipeline;
-
 use crate::errors::Result;
 use crate::message::{
     AstrBotMessage, HandlerRef, MessageChain, MessageComponent, MessageHandler, MessageMember,
