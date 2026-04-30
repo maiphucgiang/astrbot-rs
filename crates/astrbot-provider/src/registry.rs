@@ -68,6 +68,9 @@ impl ProviderRegistry {
         registry.register("baichuan", |c| {
             Box::new(crate::sources::baichuan::create(c.api_key, c.model))
         });
+        registry.register("claude", |c| {
+            Box::new(crate::sources::claude::ClaudeProvider::new(c))
+        });
         registry.register("cohere", |c| {
             Box::new(crate::sources::cohere::create(c.api_key, c.model))
         });

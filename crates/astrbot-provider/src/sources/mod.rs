@@ -2,6 +2,7 @@ pub mod ai21;
 pub mod azure;
 pub mod baichuan;
 pub mod baidu;
+pub mod claude;
 pub mod cohere;
 pub mod deepseek;
 pub mod fireworks;

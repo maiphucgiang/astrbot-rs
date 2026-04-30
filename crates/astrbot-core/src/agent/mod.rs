@@ -19,6 +19,12 @@ pub use coze::*;
 mod dify;
 pub use dify::*;
 
+mod dashscope;
+pub use dashscope::*;
+
+mod deerflow;
+pub use deerflow::*;
+
 /// Agent execution result
 #[derive(Debug, Clone)]
 pub enum AgentResult {
