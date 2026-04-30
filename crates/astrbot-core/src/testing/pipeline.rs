@@ -125,13 +125,13 @@ mod tests {
 
         // Give the adapter our handler (safe because no other refs yet)
         if let Some(a) = Arc::get_mut(&mut adapter) {
-            a.set_message_handler(handler);
+            a.set_message_handler(handler).await;
         }
         adapter.initialize().await.unwrap();
         adapter.start().await.unwrap();
 
         // Give the adapter our handler
-        adapter.set_message_handler(handler);
+        adapter.set_message_handler(handler).await;
         adapter.initialize().await.unwrap();
         adapter.start().await.unwrap();
 
@@ -179,7 +179,7 @@ mod tests {
             adapter.clone(),
             "You are a test bot.",
         ));
-        adapter.set_message_handler(handler);
+        adapter.set_message_handler(handler).await;
         adapter.initialize().await.unwrap();
         adapter.start().await.unwrap();
 
@@ -219,7 +219,7 @@ mod tests {
             adapter.clone(),
             "You are a test bot.",
         ));
-        adapter.set_message_handler(handler);
+        adapter.set_message_handler(handler).await;
         adapter.initialize().await.unwrap();
         adapter.start().await.unwrap();
 
@@ -244,7 +244,7 @@ mod tests {
     async fn test_e2e_handler_records_messages() {
         let (mut adapter, shared) = MockPlatformAdapter::new("mock", "Mock Platform");
         let handler = Arc::new(MockMessageHandler::new());
-        adapter.set_message_handler(handler.clone());
+        adapter.set_message_handler(handler.clone()).await;
         adapter.initialize().await.unwrap();
         adapter.start().await.unwrap();
 

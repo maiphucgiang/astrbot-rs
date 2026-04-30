@@ -162,6 +162,7 @@ pub struct WorkflowDefinition {
 }
 
 /// Compiled workflow graph for execution.
+#[derive(Debug)]
 pub struct WorkflowGraph {
     pub definition: WorkflowDefinition,
     /// Node lookup by ID.
@@ -275,7 +276,7 @@ impl LlmClient {
         result = result.replace("{{user_input}}", user_input);
         // Replace {{state.KEY}} with state value
         for (key, value) in state {
-            let placeholder = format!("{{state.{}}}", key);
+            let placeholder = format!("{{{{state.{}}}}}", key);
             let val_str = match value {
                 Value::String(s) => s.clone(),
                 other => other.to_string(),
@@ -399,8 +400,10 @@ impl DeerFlowEngine {
         let mut current_id = "start".to_string();
         let mut state = ctx.state.clone();
 
-        // Seed user_input into state
-        state.insert("user_input".to_string(), Value::String(ctx.user_input.clone()));
+        // Seed user_input into state (only if not already present from extras)
+        if !state.contains_key("user_input") {
+            state.insert("user_input".to_string(), Value::String(ctx.user_input.clone()));
+        }
 
         let max_steps = 100usize;
         let mut steps = 0usize;
@@ -473,9 +476,11 @@ impl DeerFlowEngine {
                 }
                 WorkflowNode::End { output_key, .. } => {
                     let output = state.get(output_key.as_str())
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
+                        .map(|v| match v {
+                            Value::String(s) => s.clone(),
+                            other => other.to_string(),
+                        })
+                        .unwrap_or_default();
                     return Ok(AgentResult::Text { content: output });
                 }
             }
@@ -511,6 +516,14 @@ impl DeerFlowEngine {
 pub struct DeerFlowAgentRunner {
     engine: DeerFlowEngine,
     system_prompt: Option<String>,
+}
+
+impl std::fmt::Debug for DeerFlowAgentRunner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeerFlowAgentRunner")
+            .field("system_prompt", &self.system_prompt)
+            .finish_non_exhaustive()
+    }
 }
 
 impl DeerFlowAgentRunner {
@@ -675,6 +688,7 @@ mod tests {
     use crate::agent::AgentConfig;
     use crate::platform::MessageSource;
     use crate::provider::ChatMessage;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     fn make_test_config(workflow: Value) -> AgentConfig {
         AgentConfig {
@@ -873,16 +887,24 @@ mod tests {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
             .await
             .unwrap();
-        let (mut stream, _) = listener.accept().await.unwrap();
-        let mut buf = vec![0u8; 4096];
-        let n = stream.read(&mut buf).await.unwrap_or(0);
-        let _req = String::from_utf8_lossy(&buf[..n]);
-        let http_response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n{}",
-            response_body.len(),
-            response_body
-        );
-        stream.write_all(http_response.as_bytes()).await.unwrap();
+        let mut handled = 0;
+        while handled < 200 {
+            match tokio::time::timeout(tokio::time::Duration::from_millis(500), listener.accept()).await {
+                Ok(Ok((mut stream, _))) => {
+                    let mut buf = vec![0u8; 4096];
+                    let n = stream.read(&mut buf).await.unwrap_or(0);
+                    let _req = String::from_utf8_lossy(&buf[..n]);
+                    let http_response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n{}",
+                        response_body.len(),
+                        response_body
+                    );
+                    stream.write_all(http_response.as_bytes()).await.unwrap();
+                    handled += 1;
+                }
+                _ => break,
+            }
+        }
     }
 
     #[tokio::test]

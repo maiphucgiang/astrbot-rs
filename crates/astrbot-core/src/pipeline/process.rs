@@ -266,7 +266,7 @@ mod tests {
                 role: None,
                 is_self: false,
             },
-            message_type: MessageType::Text,
+            message_type: MessageType::Private,
             chain: MessageChain::new().text(text),
             raw_payload: None,
         };
@@ -275,7 +275,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_stage_provider_fallback() {
-        let provider = Arc::new(MockProvider::new(vec!["Hello from mock!".to_string()]));
+        let provider = Arc::new(MockProvider::new("mock", "Mock")
+            .with_chat_response("Hello from mock!"));
         let stage = ProcessStage::new().with_provider(provider);
 
         let mut event = make_test_event("Hi");
@@ -300,10 +301,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_stage_history_roundtrip() {
-        let provider = Arc::new(MockProvider::new(vec![
-            "Reply 1".to_string(),
-            "Reply 2".to_string(),
-        ]));
+        let provider = Arc::new(MockProvider::new("mock", "Mock")
+            .with_chat_response("Reply"));
         let stage = ProcessStage::new().with_provider(provider);
 
         let mut event1 = make_test_event("Message 1");

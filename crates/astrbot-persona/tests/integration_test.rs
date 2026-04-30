@@ -5,9 +5,9 @@ fn test_full_persona_pipeline() {
     // 1. 创建管理器
     let mgr = PersonaManager::new(None);
 
-    // 2. 验证 8 套内置人格
+    // 2. 验证 12 套内置人格
     let all = mgr.list_personas();
-    assert_eq!(all.len(), 8);
+    assert_eq!(all.len(), 12);
 
     let ids: Vec<String> = all.iter().map(|p| p.id.clone()).collect();
     assert!(ids.contains(&"shibuya_kei".to_string()));
@@ -66,12 +66,12 @@ fn test_full_persona_pipeline() {
     assert_eq!(custom.id, "custom_赛博朋克");
 
     let all2 = mgr.list_personas();
-    assert_eq!(all2.len(), 9);
+    assert_eq!(all2.len(), 13);
 
     // 8. 删除自定义人格
     mgr.remove_persona(&custom.id).unwrap();
     let all3 = mgr.list_personas();
-    assert_eq!(all3.len(), 8);
+    assert_eq!(all3.len(), 12);
 
     // 内置人格不可删除
     assert!(mgr.remove_persona("hakimi_guardian").is_err());

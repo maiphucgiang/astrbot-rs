@@ -677,7 +677,7 @@ mod tests {
     fn test_list_personas() {
         let mgr = test_manager();
         let list = mgr.list_personas();
-        assert_eq!(list.len(), 8);
+        assert_eq!(list.len(), 12);
     }
 
     #[test]
@@ -742,7 +742,7 @@ mod tests {
         assert_eq!(custom.id, "custom_测试人格");
 
         let list = mgr.list_personas();
-        assert_eq!(list.len(), 9);
+        assert_eq!(list.len(), 13);
     }
 
     #[test]

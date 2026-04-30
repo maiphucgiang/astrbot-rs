@@ -266,6 +266,7 @@ impl MockPlatformAdapter {
 
     pub async fn start(&mut self) -> Result<()> {
         self.running.store(true, Ordering::Relaxed);
+        self.connected.store(true, Ordering::Relaxed);
 
         let rx = {
             let mut guard = self.incoming_rx.lock().await;
@@ -328,8 +329,8 @@ impl MockPlatformAdapter {
         Ok(self.running.load(Ordering::Relaxed) && self.connected.load(Ordering::Relaxed))
     }
 
-    pub fn set_message_handler(&mut self, handler: Arc<dyn MessageHandler>) {
-        let mut h = self.handler.blocking_lock();
+    pub async fn set_message_handler(&mut self, handler: Arc<dyn MessageHandler>) {
+        let mut h = self.handler.lock().await;
         *h = Some(handler);
     }
 
@@ -517,7 +518,7 @@ mod tests {
     async fn test_mock_adapter_send_and_receive() {
         let (mut adapter, shared) = MockPlatformAdapter::new("mock", "Mock");
         let handler = Arc::new(MockMessageHandler::new());
-        adapter.set_message_handler(handler.clone());
+        adapter.set_message_handler(handler.clone()).await;
 
         adapter.initialize().await.unwrap();
         adapter.start().await.unwrap();

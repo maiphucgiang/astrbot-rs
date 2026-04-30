@@ -168,6 +168,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_local_booter_exec_python() {
+        // Skip if Python is not available in the test environment.
+        let has_python = std::process::Command::new("python3")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+            || std::process::Command::new("python")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+        if !has_python {
+            return;
+        }
+
         let booter = LocalBooter::new();
         booter.boot("test_exec").await.unwrap();
         let result = booter.exec("print('hello computer')").await.unwrap();

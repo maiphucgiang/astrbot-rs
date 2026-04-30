@@ -239,7 +239,7 @@ mod tests {
                 role: None,
                 is_self: false,
             },
-            message_type: MessageType::Text,
+            message_type: MessageType::Private,
             chain: MessageChain::new(),
             raw_payload: None,
         };

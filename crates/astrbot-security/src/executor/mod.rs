@@ -107,7 +107,8 @@ impl HardenedLocalExecutor {
                 .arg("--dev")
                 .arg("/dev")
                 .arg("--chdir")
-                .arg("/tmp");
+                .arg("/tmp")
+                .arg("python3");
             c
         } else {
             Command::new("python3")

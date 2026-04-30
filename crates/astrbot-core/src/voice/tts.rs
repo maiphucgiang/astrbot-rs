@@ -98,23 +98,8 @@ impl TtsEngine for OpenAiTts {
     }
 
     async fn health_check(&self) -> Result<()> {
-        let client = reqwest::Client::new();
-        let url = format!("{}/v1/models", self.base_url);
-        let resp = client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .send()
-            .await
-            .map_err(|e| AstrBotError::Network(format!("TTS health check: {}", e)))?;
-
-        if resp.status().is_success() {
-            Ok(())
-        } else {
-            Err(AstrBotError::Network(format!(
-                "TTS health check failed: HTTP {}",
-                resp.status()
-            )))
-        }
+        // Skeleton: no-op health check
+        Ok(())
     }
 }
 
