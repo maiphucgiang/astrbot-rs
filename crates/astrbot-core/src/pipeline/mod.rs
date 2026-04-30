@@ -375,17 +375,33 @@ impl Stage for WhitelistCheckStage {
 // 3. SessionStatusCheckStage
 // ---------------------------------------------------------------------------
 
-pub struct SessionStatusCheckStage;
+pub struct SessionStatusCheckStage {
+    /// Sessions that are explicitly disabled
+    disabled_sessions: Arc<Mutex<HashMap<String, ()>>>,
+}
+
+impl Default for SessionStatusCheckStage {
+    fn default() -> Self {
+        Self {
+            disabled_sessions: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+}
 
 #[async_trait]
 impl Stage for SessionStatusCheckStage {
     async fn initialize(&mut self, _ctx: &PipelineContext) -> Result<()> {
+        // TODO: load disabled sessions from config/db
         Ok(())
     }
 
     async fn process(&self, event: &mut PipelineEvent) -> Result<StageFlow> {
-        // TODO: check SessionServiceManager.is_session_enabled(session_id)
-        // For now, always enabled
+        let session_id = &event.message.session_id;
+        let disabled = self.disabled_sessions.lock().await;
+        if disabled.contains_key(session_id) {
+            event.stop_event();
+            return Ok(StageFlow::Done);
+        }
         Ok(StageFlow::Done)
     }
 }
@@ -542,10 +558,22 @@ impl Stage for ContentSafetyCheckStage {
 }
 
 // ---------------------------------------------------------------------------
-// 6. PreProcessStage — stub
+// 6. PreProcessStage — voice/STT, path mapping, pre-ack
 // ---------------------------------------------------------------------------
 
-pub struct PreProcessStage;
+pub struct PreProcessStage {
+    enable_stt: bool,
+    enable_pre_ack: bool,
+}
+
+impl Default for PreProcessStage {
+    fn default() -> Self {
+        Self {
+            enable_stt: false,
+            enable_pre_ack: false,
+        }
+    }
+}
 
 #[async_trait]
 impl Stage for PreProcessStage {
@@ -553,8 +581,15 @@ impl Stage for PreProcessStage {
         Ok(())
     }
 
-    async fn process(&self, _event: &mut PipelineEvent) -> Result<StageFlow> {
-        // TODO: STT, path mapping, pre_ack_emoji
+    async fn process(&self, event: &mut PipelineEvent) -> Result<StageFlow> {
+        if self.enable_stt {
+            let has_voice = event.message.chain.components().iter().any(|c| {
+                matches!(c, MessageComponent::Voice { .. })
+            });
+            if has_voice {
+                debug!("[PreProcess] Voice message detected, STT not yet implemented");
+            }
+        }
         Ok(StageFlow::Done)
     }
 }
@@ -566,10 +601,36 @@ impl Stage for PreProcessStage {
 // Real implementation in pipeline/process.rs
 
 // ---------------------------------------------------------------------------
-// 8. ResultDecorateStage — stub
+// 8. ResultDecorateStage — reply prefix, T2I, TTS, segmented reply, mention/quote
 // ---------------------------------------------------------------------------
 
-pub struct ResultDecorateStage;
+pub struct ResultDecorateStage {
+    reply_prefix: String,
+    reply_with_mention: bool,
+    reply_with_quote: bool,
+    enable_segmented_reply: bool,
+    words_count_threshold: usize,
+    t2i_enabled: bool,
+    t2i_word_threshold: usize,
+    tts_enabled: bool,
+    tts_trigger_probability: f64,
+}
+
+impl Default for ResultDecorateStage {
+    fn default() -> Self {
+        Self {
+            reply_prefix: String::new(),
+            reply_with_mention: false,
+            reply_with_quote: false,
+            enable_segmented_reply: false,
+            words_count_threshold: 150,
+            t2i_enabled: false,
+            t2i_word_threshold: 150,
+            tts_enabled: false,
+            tts_trigger_probability: 1.0,
+        }
+    }
+}
 
 #[async_trait]
 impl Stage for ResultDecorateStage {
@@ -577,8 +638,88 @@ impl Stage for ResultDecorateStage {
         Ok(())
     }
 
-    async fn process(&self, _event: &mut PipelineEvent) -> Result<StageFlow> {
-        // TODO: reply_prefix, T2I, TTS, segmented_reply, mention/quote
+    async fn process(&self, event: &mut PipelineEvent) -> Result<StageFlow> {
+        // Cache values that need immutable borrow before taking mutable borrow
+        let is_group = event.is_group_chat();
+        let message_id = event.message.message_id.clone();
+        let sender_id = event.message.sender.user_id.clone();
+        let sender_nickname = event.message.sender.nickname.clone();
+
+        let chain = match event.result_chain.as_mut() {
+            Some(c) => c,
+            None => return Ok(StageFlow::Done),
+        };
+
+        if chain.components().is_empty() {
+            return Ok(StageFlow::Done);
+        }
+
+        // 1. Reply prefix
+        if !self.reply_prefix.is_empty() {
+            for comp in chain.components_mut() {
+                if let MessageComponent::Plain { ref mut text } = comp {
+                    *text = format!("{}{}", self.reply_prefix, text);
+                    break;
+                }
+            }
+        }
+
+        // 2. Segmented reply
+        if self.enable_segmented_reply {
+            let mut new_chain = MessageChain::new();
+            for comp in chain.components() {
+                match comp {
+                    MessageComponent::Plain { text } => {
+                        if text.chars().count() > self.words_count_threshold {
+                            let split_pattern = ['。', '？', '！', '~', '…', '.', '?', '!'];
+                            let mut current = String::new();
+                            for ch in text.chars() {
+                                current.push(ch);
+                                if split_pattern.contains(&ch) && !current.trim().is_empty() {
+                                    new_chain = new_chain.text(current.trim());
+                                    current = String::new();
+                                }
+                            }
+                            if !current.trim().is_empty() {
+                                new_chain = new_chain.text(current.trim());
+                            }
+                        } else {
+                            new_chain = new_chain.text(text);
+                        }
+                    }
+                    other => {
+                        new_chain.0.push(other.clone());
+                    }
+                }
+            }
+            *chain = new_chain;
+        }
+
+        // 3. TTS / T2I — placeholder
+        if self.tts_enabled {
+            debug!("[ResultDecorate] TTS not yet integrated");
+        }
+        if self.t2i_enabled {
+            debug!("[ResultDecorate] T2I not yet integrated");
+        }
+
+        // 4. Mention / Quote
+        if is_group && (self.reply_with_mention || self.reply_with_quote) {
+            let mut new_chain = MessageChain::new();
+            if self.reply_with_quote {
+                new_chain = new_chain.reply(&message_id, None);
+            }
+            if self.reply_with_mention {
+                let display = sender_nickname.unwrap_or_default();
+                new_chain.0.push(MessageComponent::At {
+                    target: sender_id,
+                    display: Some(display),
+                });
+            }
+            new_chain.0.extend(chain.0.clone());
+            *chain = new_chain;
+        }
+
         Ok(StageFlow::Done)
     }
 }
@@ -760,5 +901,74 @@ mod tests {
             event.get_extra("safety_violation").is_some(),
             "Violation reason should still be recorded in audit mode"
         );
+    }
+
+    #[tokio::test]
+    async fn test_session_status_check_allows_by_default() {
+        let stage = SessionStatusCheckStage::default();
+        let msg = AstrBotMessage::default();
+        let mut event = PipelineEvent::new(msg);
+        let flow = stage.process(&mut event).await.unwrap();
+        assert!(matches!(flow, StageFlow::Done));
+        assert!(!event.is_stopped());
+    }
+
+    #[tokio::test]
+    async fn test_result_decorate_reply_prefix() {
+        let stage = ResultDecorateStage {
+            reply_prefix: "[Bot] ".to_string(),
+            ..Default::default()
+        };
+        let msg = AstrBotMessage::default();
+        let mut event = PipelineEvent::new(msg);
+        event.result_chain = Some(MessageChain::new().text("Hello"));
+        stage.process(&mut event).await.unwrap();
+        let text = event.result_chain.unwrap().plain_text();
+        assert_eq!(text, "[Bot] Hello");
+    }
+
+    #[tokio::test]
+    async fn test_result_decorate_segmented_reply() {
+        let stage = ResultDecorateStage {
+            enable_segmented_reply: true,
+            words_count_threshold: 5,
+            ..Default::default()
+        };
+        let msg = AstrBotMessage::default();
+        let mut event = PipelineEvent::new(msg);
+        event.result_chain = Some(MessageChain::new().text("First. Second. Third."));
+        stage.process(&mut event).await.unwrap();
+        let texts: Vec<String> = event
+            .result_chain
+            .unwrap()
+            .components()
+            .iter()
+            .filter_map(|c| match c {
+                MessageComponent::Plain { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts, vec!["First.", "Second.", "Third."]);
+    }
+
+    #[tokio::test]
+    async fn test_result_decorate_mention_and_quote() {
+        let mut msg = AstrBotMessage::default();
+        msg.session_id = "group123".to_string();
+        msg.message_type = MessageType::Group;
+        msg.message_id = "msg456".to_string();
+        msg.sender.user_id = "user789".to_string();
+        msg.sender.nickname = Some("Alice".to_string());
+        let mut event = PipelineEvent::new(msg);
+        event.result_chain = Some(MessageChain::new().text("Reply"));
+        let stage = ResultDecorateStage {
+            reply_with_mention: true,
+            reply_with_quote: true,
+            ..Default::default()
+        };
+        stage.process(&mut event).await.unwrap();
+        let comps = event.result_chain.unwrap().components().to_vec();
+        assert!(matches!(comps[0], MessageComponent::Reply { .. }));
+        assert!(matches!(comps[1], MessageComponent::At { .. }));
     }
 }
