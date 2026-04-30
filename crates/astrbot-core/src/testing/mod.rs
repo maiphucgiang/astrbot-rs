@@ -194,8 +194,10 @@ impl Provider for MockProvider {
 /// An in-memory platform adapter backed by tokio mpsc channels.
 ///
 /// # Usage
-/// ```
+/// ```no_run
 /// # use astrbot_core::testing::MockPlatformAdapter;
+/// #[tokio::main]
+/// async fn main() {
 /// let (mut adapter, shared) = MockPlatformAdapter::new("mock", "Mock Platform");
 /// adapter.initialize().await.unwrap();
 /// adapter.start().await.unwrap();
@@ -205,6 +207,7 @@ impl Provider for MockProvider {
 ///
 /// // Collect outgoing replies
 /// let replies = adapter.drain_outgoing().await;
+/// }
 /// ```
 pub struct MockPlatformAdapter {
     metadata: PlatformMetadata,
