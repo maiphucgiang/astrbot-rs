@@ -8,6 +8,7 @@ pub mod db;
 pub mod errors;
 pub mod event;
 pub mod i18n;
+pub mod local_llm;
 pub mod mcp;
 pub mod message;
 pub mod metrics;
