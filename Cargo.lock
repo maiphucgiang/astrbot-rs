@@ -136,6 +136,7 @@ dependencies = [
  "astrbot-ux",
  "clap",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

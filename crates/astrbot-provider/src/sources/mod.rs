@@ -12,6 +12,7 @@ pub mod hyperbolic;
 pub mod lmstudio;
 pub mod minimax;
 pub mod moonshot;
+pub mod ollama;
 pub mod oneapi;
 pub mod openrouter;
 pub mod perplexity;

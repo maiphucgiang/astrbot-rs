@@ -24,6 +24,9 @@ impl ProviderRegistry {
         registry.register("groq", |c| {
             Box::new(crate::sources::groq::create(c.api_key, c.model))
         });
+        registry.register("ollama", |c| {
+            Box::new(crate::sources::ollama::OllamaProvider::new(c))
+        });
         registry.register("openrouter", |c| {
             Box::new(crate::sources::openrouter::create(c.api_key, c.model))
         });
