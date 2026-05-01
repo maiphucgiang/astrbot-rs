@@ -25,6 +25,8 @@ pub use dashscope::*;
 mod deerflow;
 pub use deerflow::*;
 
+pub mod context;
+
 /// Agent execution result
 #[derive(Debug, Clone)]
 pub enum AgentResult {
