@@ -1,5 +1,6 @@
 pub mod document;
 pub mod embedding;
+pub mod embedding_provider;
 pub mod rerank;
 pub mod retriever;
 pub mod splitter;
