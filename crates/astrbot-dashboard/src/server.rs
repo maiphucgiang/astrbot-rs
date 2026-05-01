@@ -30,6 +30,8 @@ pub struct AppState {
     pub sessions: Arc<RwLock<Vec<Value>>>,
     /// 日志条目列表（内存中保留最近 1000 条）
     pub logs: Arc<RwLock<Vec<Value>>>,
+    /// SSE 广播器
+    pub sse_broadcaster: Option<Arc<crate::sse::SseBroadcaster>>,
     /// 系统启动时间
     pub start_time: std::time::Instant,
     /// 配置文件路径
@@ -47,6 +49,7 @@ impl AppState {
             persona_manager: Arc::new(std::sync::Mutex::new(persona_mgr)),
             sessions: Arc::new(RwLock::new(vec![])),
             logs: Arc::new(RwLock::new(vec![])),
+            sse_broadcaster: Some(Arc::new(crate::sse::SseBroadcaster::default())),
             start_time: std::time::Instant::now(),
             config_path: "data/config.json".to_string(),
         }
@@ -153,6 +156,8 @@ fn build_router(state: AppState) -> Router {
         .route("/api/settings/:key", get(get_setting).put(update_setting))
         // 日志
         .route("/api/logs", get(get_logs))
+        // SSE 实时推送
+        .route("/api/events", get(crate::sse::events_handler))
         // WebChat WebSocket
         .route("/ws/chat", get(chat_ws_handler))
         // 新增路由

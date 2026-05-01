@@ -192,6 +192,7 @@ dependencies = [
  "astrbot-provider",
  "axum",
  "chrono",
+ "futures-util",
  "serde",
  "serde_json",
  "tokio",

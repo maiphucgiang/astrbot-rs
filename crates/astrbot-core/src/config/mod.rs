@@ -10,7 +10,8 @@ pub use env_override::*;
 pub use hot_reload::*;
 
 /// Core AstrBot configuration
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default)]
 pub struct AstrBotConfig {
     /// Bot nickname
     pub nickname: String,
@@ -33,23 +34,6 @@ pub struct AstrBotConfig {
     /// Additional settings
     #[serde(flatten)]
     pub extra: HashMap<String, serde_json::Value>,
-}
-
-impl Default for AstrBotConfig {
-    fn default() -> Self {
-        Self {
-            nickname: "AstrBot".to_string(),
-            prefixes: vec!["/".to_string()],
-            admins: Vec::new(),
-            platforms: Vec::new(),
-            providers: Vec::new(),
-            plugins: HashMap::new(),
-            webui: WebUiConfig::default(),
-            log_level: "info".to_string(),
-            database_url: "sqlite:data/data.db".to_string(),
-            extra: HashMap::new(),
-        }
-    }
 }
 
 impl AstrBotConfig {
