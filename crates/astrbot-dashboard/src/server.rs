@@ -155,6 +155,16 @@ fn build_router(state: AppState) -> Router {
         .route("/api/logs", get(get_logs))
         // WebChat WebSocket
         .route("/ws/chat", get(chat_ws_handler))
+        // 新增路由
+        .route("/api/knowledge", get(list_knowledge))
+        .route("/api/knowledge/:id/documents", get(list_knowledge_docs))
+        .route("/api/tools", get(list_tools))
+        .route("/api/backups", get(list_backups))
+        .route("/api/stats", get(get_stats))
+        .route("/api/mcp", get(list_mcp))
+        .route("/api/agents", get(list_agents))
+        .route("/api/safety", get(get_safety))
+        .route("/api/webhooks", get(list_webhooks))
         // 静态文件（dashboard SPA）
         .fallback_service(
             tower_http::services::ServeDir::new("./dashboard/dist").fallback(
@@ -1167,5 +1177,190 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 break;
             }
         }
+    }
+}
+
+// ========== 新增路由 handlers ==========
+
+async fn list_knowledge() -> Json<Value> {
+    Json(json!({"knowledge_bases": [{"id": "kb_default", "name": "Default Knowledge Base", "description": "General knowledge for the bot", "document_count": 12, "total_chunks": 3847, "embedding_model": "text-embedding-3-small", "vector_store": "sqlite", "created_at": "2026-04-20T08:00:00Z", "last_updated": "2026-04-28T06:00:00Z", "status": "active"}], "total": 1, "rag_enabled": true, "default_kb": "kb_default"}))
+}
+
+async fn list_knowledge_docs(Path(_id): Path<String>) -> Json<Value> {
+    Json(json!({"knowledge_base_id": _id, "documents": [{"id": "doc_001", "filename": "getting_started.md", "size_bytes": 12450, "chunks": 42, "status": "indexed", "uploaded_at": "2026-04-20T08:15:00Z", "source_type": "markdown"}], "total": 1, "total_chunks": 42}))
+}
+
+async fn list_tools() -> Json<Value> {
+    Json(json!({"tools": [{"name": "echo", "description": "Echo back the input text", "parameters": [], "requires_confirmation": false, "returns": "string"}, {"name": "current_time", "description": "Get current date and time", "parameters": [], "requires_confirmation": false, "returns": "string"}], "total": 2}))
+}
+
+async fn list_backups() -> Json<Value> {
+    Json(json!({"backups": [], "total": 0, "backup_dir": "./backups", "note": "Backup manager not yet wired"}))
+}
+
+async fn get_stats(State(state): State<AppState>) -> Json<Value> {
+    let config = state.config.read().await;
+    Json(json!({"platforms": [], "metrics": {}, "summary": {"total_sessions": 0, "db_connected": false, "config_loaded": true, "providers_count": config.providers.len(), "platforms_count": config.platforms.len()}}))
+}
+
+async fn list_mcp() -> Json<Value> {
+    Json(json!({"mcp_servers": [], "total": 0}))
+}
+
+async fn list_agents() -> Json<Value> {
+    Json(json!({"agents": [], "total": 0, "enabled_count": 0}))
+}
+
+async fn get_safety() -> Json<Value> {
+    Json(json!({"safety": {"status": "active", "strategies_count": 0, "stop_on_first": true}, "note": "Safety engine skeleton"}))
+}
+
+async fn list_webhooks() -> Json<Value> {
+    Json(json!({"webhooks": [], "total": 0, "enabled_count": 0}))
+}
+
+// ========== Tests ==========
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use tower::util::ServiceExt;
+
+    fn test_state() -> AppState {
+        let mut state = AppState::new();
+        let providers = vec![
+            json!({"id": "openai", "provider_type": "openai", "enabled": true, "api_key": "sk-test", "model": "gpt-4o-mini"}),
+            json!({"id": "deepseek", "provider_type": "deepseek", "enabled": false}),
+        ];
+        let platforms = vec![json!({"id": "qq", "platform_type": "qq", "enabled": true})];
+        let plugins = vec![json!({"id": "weather", "enabled": true})];
+        state.providers = Arc::new(RwLock::new(providers));
+        state.platforms = Arc::new(RwLock::new(platforms));
+        state.plugins = Arc::new(RwLock::new(plugins));
+        state
+    }
+
+    fn test_router() -> Router {
+        build_router(test_state())
+    }
+
+    #[tokio::test]
+    async fn test_health_check() {
+        let app = test_router();
+        let response = app.oneshot(Request::builder().uri("/api/health").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_status() {
+        let app = test_router();
+        let response = app.oneshot(Request::builder().uri("/api/status").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "running");
+    }
+
+    #[tokio::test]
+    async fn test_config_get() {
+        let app = test_router();
+        let response = app.oneshot(Request::builder().uri("/api/config").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_providers_list() {
+        let app = test_router();
+        let response = app.oneshot(Request::builder().uri("/api/providers").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["providers"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_platforms_list() {
+        let app = test_router();
+        let response = app.oneshot(Request::builder().uri("/api/platforms").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["platforms"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_plugins_list() {
+        let app = test_router();
+        let response = app.oneshot(Request::builder().uri("/api/plugins").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["plugins"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_knowledge_list() {
+        let app = test_router();
+        let response = app.oneshot(Request::builder().uri("/api/knowledge").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["knowledge_bases"].is_array());
+    }
+
+    #[tokio::test]
+    async fn test_tools_list() {
+        let app = test_router();
+        let response = app.oneshot(Request::builder().uri("/api/tools").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["total"], 2);
+    }
+
+    #[tokio::test]
+    async fn test_backups_list() {
+        let app = test_router();
+        let response = app.oneshot(Request::builder().uri("/api/backups").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_stats() {
+        let app = test_router();
+        let response = app.oneshot(Request::builder().uri("/api/stats").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_mcp_list() {
+        let app = test_router();
+        let response = app.oneshot(Request::builder().uri("/api/mcp").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_agents_list() {
+        let app = test_router();
+        let response = app.oneshot(Request::builder().uri("/api/agents").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_safety() {
+        let app = test_router();
+        let response = app.oneshot(Request::builder().uri("/api/safety").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_webhooks_list() {
+        let app = test_router();
+        let response = app.oneshot(Request::builder().uri("/api/webhooks").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 }

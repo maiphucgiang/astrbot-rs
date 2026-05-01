@@ -13,7 +13,7 @@ astrbot-persona = { path = "../astrbot-persona" }
 astrbot-provider = { path = "../astrbot-provider" }
 axum = { workspace = true }
 tokio = { workspace = true }
-tower = { workspace = true }
+tower = { workspace = true, features = ["util"] }
 tower-http = { version = "0.5", features = ["fs"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
