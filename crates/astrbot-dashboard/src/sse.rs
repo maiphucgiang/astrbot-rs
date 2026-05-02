@@ -52,7 +52,7 @@ impl DashboardEvent {
 
 pub struct SseClient {
     pub id: String,
-    pub rx: broadcast::Receiver<DashboardEvent>,
+    rx: broadcast::Receiver<DashboardEvent>,
 }
 
 pub struct SseBroadcaster {
@@ -91,12 +91,7 @@ impl SseBroadcaster {
         let _ = self.tx.send(event);
     }
 
-    pub fn broadcast_provider_status(
-        &self,
-        provider_id: impl Into<String>,
-        status: impl Into<String>,
-        error: Option<String>,
-    ) {
+    pub fn broadcast_provider_status(&self, provider_id: impl Into<String>, status: impl Into<String>, error: Option<String>) {
         self.broadcast_event(DashboardEvent::ProviderStatusChange {
             provider_id: provider_id.into(),
             status: status.into(),
@@ -104,12 +99,7 @@ impl SseBroadcaster {
         });
     }
 
-    pub fn broadcast_plugin_install(
-        &self,
-        plugin_id: impl Into<String>,
-        action: impl Into<String>,
-        success: bool,
-    ) {
+    pub fn broadcast_plugin_install(&self, plugin_id: impl Into<String>, action: impl Into<String>, success: bool) {
         self.broadcast_event(DashboardEvent::PluginInstall {
             plugin_id: plugin_id.into(),
             action: action.into(),
@@ -132,10 +122,10 @@ impl Default for SseBroadcaster {
 }
 
 pub struct DashboardEventStream {
-    pub client_id: String,
-    pub rx: broadcast::Receiver<DashboardEvent>,
-    pub heartbeat: tokio::time::Interval,
-    pub broadcaster: Arc<SseBroadcaster>,
+    client_id: String,
+    rx: broadcast::Receiver<DashboardEvent>,
+    heartbeat: tokio::time::Interval,
+    broadcaster: Arc<SseBroadcaster>,
 }
 
 impl Stream for DashboardEventStream {
@@ -153,14 +143,8 @@ impl Stream for DashboardEventStream {
                 return Poll::Ready(None);
             }
             Err(broadcast::error::TryRecvError::Lagged(_)) => {
-                let evt = Event::default().data(
-                    json!({
-                        "event_type": "system_notice",
-                        "level": "warn",
-                        "message": "events lagged, some events may have been skipped"
-                    })
-                    .to_string(),
-                );
+                let evt = Event::default()
+                    .data(json!({"event_type": "system_notice", "level": "warn", "message": "events lagged, some events may have been skipped"}).to_string());
                 return Poll::Ready(Some(Ok(evt)));
             }
         }
@@ -251,11 +235,7 @@ mod tests {
         broadcaster.broadcast_plugin_install("weather", "install", true);
         let received = rx.try_recv().expect("should receive");
         match received {
-            DashboardEvent::PluginInstall {
-                plugin_id,
-                action,
-                success,
-            } => {
+            DashboardEvent::PluginInstall { plugin_id, action, success } => {
                 assert_eq!(plugin_id, "weather");
                 assert_eq!(action, "install");
                 assert!(success);
@@ -295,8 +275,6 @@ mod tests {
             level: "warn".to_string(),
             message: "after remove".to_string(),
         });
-        // broadcast channel receivers still get messages even if removed from HashMap;
-        // removal only affects client_count tracking.
         assert!(rx1.try_recv().is_ok());
         assert!(rx2.try_recv().is_ok());
         assert_eq!(broadcaster.client_count().await, 1);

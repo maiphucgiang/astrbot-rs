@@ -22,3 +22,4 @@ tracing = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 futures-util = { workspace = true }
+sysinfo = "0.30"

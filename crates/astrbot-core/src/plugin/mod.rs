@@ -11,6 +11,18 @@ use crate::platform::MessageSource;
 mod sender;
 pub use sender::{MessageSender, PluginMessageSender};
 
+/// Plugin lifecycle states
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum PluginLifecycle {
+    Installed,
+    Loaded,
+    Initialized,
+    Running,
+    Stopped,
+    Unloaded,
+    Error,
+}
+
 /// Plugin metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginMetadata {
@@ -107,8 +119,27 @@ impl PluginContext {
 /// Core trait for all AstrBot plugins (Stars)
 #[async_trait]
 pub trait Plugin: Send + Sync {
-    /// Get plugin metadata
+    /// Get plugin metadata reference
     fn metadata(&self) -> &PluginMetadata;
+
+    /// Get plugin metadata (convenience clone)
+    fn get_metadata(&self) -> PluginMetadata {
+        self.metadata().clone()
+    }
+
+    /// Handle an incoming message (default delegates to on_event)
+    async fn on_message(
+        &self,
+        message: &crate::message::AstrBotMessage,
+        source: &MessageSource,
+    ) -> Result<MessageEventResult> {
+        let event = crate::event::MessageEvent {
+            source: source.clone(),
+            message: message.clone(),
+        };
+        let result = self.on_event(&event).await?;
+        Ok(result.into_message_result())
+    }
 
     /// Get configuration schema
     fn config_schema(&self) -> Vec<PluginConfigSchema> {
@@ -154,6 +185,8 @@ pub struct Star {
     pub metadata: PluginMetadata,
     pub config: PluginConfig,
     pub activated: bool,
+    pub lifecycle: PluginLifecycle,
+    pub instance_id: String,
     /// The actual plugin implementation
     pub plugin: Option<Box<dyn Plugin>>,
 }
@@ -164,6 +197,8 @@ impl Star {
             metadata,
             config: HashMap::new(),
             activated: false,
+            lifecycle: PluginLifecycle::Installed,
+            instance_id: String::new(),
             plugin: None,
         }
     }

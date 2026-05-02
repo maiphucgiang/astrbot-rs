@@ -362,8 +362,10 @@ impl Tool for WebSearchTool {
 }
 
 // ---------------------------------------------------------------------------
-// Function call parser (OpenAI format)
+// KB Tools
 // ---------------------------------------------------------------------------
+
+pub mod kb_tools;
 
 /// Parse function calls from OpenAI-style response
 pub fn parse_openai_tool_calls(content: &str) -> Vec<ToolCall> {

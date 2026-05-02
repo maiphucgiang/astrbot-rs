@@ -77,6 +77,16 @@ impl EventResult {
             reason: Some(reason.into()),
         }
     }
+
+    /// Convert to MessageEventResult (for on_message default impl)
+    pub fn into_message_result(self) -> crate::message::MessageEventResult {
+        match self {
+            EventResult::MessageReply { chain } => crate::message::MessageEventResult::Reply { chain },
+            EventResult::Nothing => crate::message::MessageEventResult::Nothing,
+            EventResult::Forward { target, chain } => crate::message::MessageEventResult::Forward { target, chain },
+            _ => crate::message::MessageEventResult::Nothing,
+        }
+    }
 }
 
 /// Message event - triggered when a message is received

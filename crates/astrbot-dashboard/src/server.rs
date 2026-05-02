@@ -1,12 +1,15 @@
-use astrbot_core::config::AstrBotConfig;
-use astrbot_persona::{CustomPersonaRequest, PersonaManager, ReplyStyle};
-use astrbot_provider::{ChatMessage, ChatOptions, ChatProvider, ProviderConfig};
 use axum::{
-    extract::ws::{Message as WsMessage, WebSocket},
-    extract::{Path, Query, State, WebSocketUpgrade},
-    routing::{delete, get, post, put},
-    Json, Router,
+    Router,
+    routing::{get, post, put, delete},
+    extract::{Path, State, Query, WebSocketUpgrade},
+    extract::ws::{WebSocket, Message as WsMessage},
+    Json,
 };
+use crate::api::{get_enhanced_status, update_config_with_broadcast, broadcast_config_update, broadcast_provider_status, broadcast_plugin_change};
+use crate::sse::SseBroadcaster;
+use astrbot_core::config::AstrBotConfig;
+use astrbot_persona::{PersonaManager, CustomPersonaRequest, ReplyStyle};
+use astrbot_provider::{ChatProvider, ChatMessage, ChatOptions, ProviderConfig};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -30,8 +33,8 @@ pub struct AppState {
     pub sessions: Arc<RwLock<Vec<Value>>>,
     /// 日志条目列表（内存中保留最近 1000 条）
     pub logs: Arc<RwLock<Vec<Value>>>,
-    /// SSE 广播器
-    pub sse_broadcaster: Option<Arc<crate::sse::SseBroadcaster>>,
+    /// SSE 实时事件广播器
+    pub sse_broadcaster: Option<Arc<SseBroadcaster>>,
     /// 系统启动时间
     pub start_time: std::time::Instant,
     /// 配置文件路径
@@ -49,7 +52,7 @@ impl AppState {
             persona_manager: Arc::new(std::sync::Mutex::new(persona_mgr)),
             sessions: Arc::new(RwLock::new(vec![])),
             logs: Arc::new(RwLock::new(vec![])),
-            sse_broadcaster: Some(Arc::new(crate::sse::SseBroadcaster::default())),
+            sse_broadcaster: Some(Arc::new(SseBroadcaster::default())),
             start_time: std::time::Instant::now(),
             config_path: "data/config.json".to_string(),
         }
@@ -77,8 +80,7 @@ impl AppState {
     pub async fn sync_providers_and_save(&self) -> anyhow::Result<()> {
         let providers = self.providers.read().await;
         let mut cfg = self.config.write().await;
-        cfg.providers = providers
-            .iter()
+        cfg.providers = providers.iter()
             .filter_map(|v| serde_json::from_value(v.clone()).ok())
             .collect();
         drop(cfg);
@@ -104,27 +106,16 @@ pub async fn start_server() {
 fn build_router(state: AppState) -> Router {
     Router::new()
         // 健康检查
-        .route(
-            "/api/health",
-            get(|| async { Json(json!({"status": "ok"})) }),
-        )
+        .route("/api/health", get(|| async { Json(json!({"status": "ok"})) }))
         // 系统状态
-        .route("/api/status", get(get_status))
+        .route("/api/status", get(get_enhanced_status))
         .route("/api/status/detailed", get(get_detailed_status))
         // 配置
-        .route("/api/config", get(get_config).put(update_config))
-        .route(
-            "/api/config/:key",
-            get(get_config_key).put(update_config_key),
-        )
+        .route("/api/config", get(get_config).put(update_config_with_broadcast))
+        .route("/api/config/:key", get(get_config_key).put(update_config_key))
         // 提供商
         .route("/api/providers", get(list_providers))
-        .route(
-            "/api/providers/:id",
-            get(get_provider)
-                .put(update_provider)
-                .delete(delete_provider),
-        )
+        .route("/api/providers/:id", get(get_provider).put(update_provider).delete(delete_provider))
         .route("/api/providers/:id/test", post(test_provider))
         // 平台适配器
         .route("/api/platforms", get(list_platforms))
@@ -136,16 +127,10 @@ fn build_router(state: AppState) -> Router {
         // 人格预设
         .route("/api/personas", get(list_personas).post(create_persona))
         .route("/api/personas/active", get(get_active_persona))
-        .route(
-            "/api/personas/:id",
-            get(get_persona).put(update_persona).delete(delete_persona),
-        )
+        .route("/api/personas/:id", get(get_persona).put(update_persona).delete(delete_persona))
         .route("/api/personas/:id/switch", post(toggle_persona))
         // 会话
-        .route(
-            "/api/sessions",
-            get(list_sessions).delete(delete_all_sessions),
-        )
+        .route("/api/sessions", get(list_sessions).delete(delete_all_sessions))
         .route("/api/sessions/:id", get(get_session).delete(delete_session))
         .route("/api/sessions/:id/history", get(get_session_history))
         // 消息历史
@@ -156,25 +141,14 @@ fn build_router(state: AppState) -> Router {
         .route("/api/settings/:key", get(get_setting).put(update_setting))
         // 日志
         .route("/api/logs", get(get_logs))
-        // SSE 实时推送
+        // SSE 实时事件
         .route("/api/events", get(crate::sse::events_handler))
         // WebChat WebSocket
         .route("/ws/chat", get(chat_ws_handler))
-        // 新增路由
-        .route("/api/knowledge", get(list_knowledge))
-        .route("/api/knowledge/:id/documents", get(list_knowledge_docs))
-        .route("/api/tools", get(list_tools))
-        .route("/api/backups", get(list_backups))
-        .route("/api/stats", get(get_stats))
-        .route("/api/mcp", get(list_mcp))
-        .route("/api/agents", get(list_agents))
-        .route("/api/safety", get(get_safety))
-        .route("/api/webhooks", get(list_webhooks))
         // 静态文件（dashboard SPA）
         .fallback_service(
-            tower_http::services::ServeDir::new("./dashboard/dist").fallback(
-                tower_http::services::ServeFile::new("./dashboard/dist/index.html"),
-            ),
+            tower_http::services::ServeDir::new("./dashboard/dist")
+                .fallback(tower_http::services::ServeFile::new("./dashboard/dist/index.html"))
         )
         .with_state(state)
 }
@@ -225,7 +199,10 @@ async fn get_config(State(state): State<AppState>) -> Json<Value> {
     Json(serde_json::to_value(&*state.config.read().await).unwrap_or_default())
 }
 
-async fn update_config(State(state): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
+async fn update_config(
+    State(state): State<AppState>,
+    Json(body): Json<Value>,
+) -> Json<Value> {
     match serde_json::from_value::<AstrBotConfig>(body) {
         Ok(new_cfg) => {
             let mut cfg = state.config.write().await;
@@ -236,7 +213,10 @@ async fn update_config(State(state): State<AppState>, Json(body): Json<Value>) -
     }
 }
 
-async fn get_config_key(State(state): State<AppState>, Path(key): Path<String>) -> Json<Value> {
+async fn get_config_key(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Json<Value> {
     let cfg = state.config.read().await;
     let cfg_val = serde_json::to_value(&*cfg).unwrap_or_default();
     Json(cfg_val.get(&key).cloned().unwrap_or(Value::Null))
@@ -255,6 +235,7 @@ async fn update_config_key(
     match serde_json::from_value::<AstrBotConfig>(cfg_val) {
         Ok(new_cfg) => {
             *cfg = new_cfg;
+            broadcast_config_update(&state, vec![key.clone()]).await;
             Json(json!({"success": true}))
         }
         Err(e) => Json(json!({"success": false, "error": format!("Invalid config: {}", e)})),
@@ -267,7 +248,10 @@ async fn list_providers(State(state): State<AppState>) -> Json<Value> {
     Json(json!({"providers": *state.providers.read().await}))
 }
 
-async fn get_provider(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
+async fn get_provider(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Json<Value> {
     let providers = state.providers.read().await;
     let provider = providers.iter().find(|p| {
         p.get("id").and_then(|v| v.as_str()) == Some(&id)
@@ -300,13 +284,17 @@ async fn update_provider(
                 obj.insert("id".to_string(), json!(id));
             }
             providers[i] = updated.clone();
+            broadcast_provider_status(&state, &id, "updated", None).await;
             Json(json!({"success": true, "provider": updated}))
         }
         None => Json(json!({"success": false, "error": "Provider not found"})),
     }
 }
 
-async fn delete_provider(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
+async fn delete_provider(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Json<Value> {
     let mut providers = state.providers.write().await;
     let len_before = providers.len();
     providers.retain(|p| {
@@ -317,7 +305,10 @@ async fn delete_provider(State(state): State<AppState>, Path(id): Path<String>) 
     Json(json!({"success": deleted, "deleted": id}))
 }
 
-async fn test_provider(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
+async fn test_provider(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Json<Value> {
     let cfg = {
         let providers = state.providers.read().await;
         let provider_cfg = providers.iter().find(|p| {
@@ -330,30 +321,11 @@ async fn test_provider(State(state): State<AppState>, Path(id): Path<String>) ->
         }
     };
 
-    let provider_type = cfg
-        .get("provider_type")
-        .and_then(|v| v.as_str())
-        .unwrap_or("openai");
-    let api_key = cfg
-        .get("api_key")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let base_url = cfg
-        .get("base_url")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let model = cfg
-        .get("model")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let name = cfg
-        .get("name")
-        .and_then(|v| v.as_str())
-        .unwrap_or(provider_type)
-        .to_string();
+    let provider_type = cfg.get("provider_type").and_then(|v| v.as_str()).unwrap_or("openai");
+    let api_key = cfg.get("api_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let base_url = cfg.get("base_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let model = cfg.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let name = cfg.get("name").and_then(|v| v.as_str()).unwrap_or(provider_type).to_string();
 
     let config = ProviderConfig {
         name: name.clone(),
@@ -386,99 +358,29 @@ async fn _test_provider_chat(
 ) -> Value {
     let provider: Box<dyn ChatProvider> = match provider_type {
         "openai" => Box::new(astrbot_provider::OpenAiCompatibleProvider::new(config)),
-        "moonshot" => Box::new(astrbot_provider::sources::moonshot::create(
-            config.api_key,
-            config.model,
-        )),
-        "deepseek" => Box::new(astrbot_provider::sources::deepseek::create(
-            config.api_key,
-            config.model,
-        )),
-        "groq" => Box::new(astrbot_provider::sources::groq::create(
-            config.api_key,
-            config.model,
-        )),
-        "openrouter" => Box::new(astrbot_provider::sources::openrouter::create(
-            config.api_key,
-            config.model,
-        )),
-        "siliconflow" => Box::new(astrbot_provider::sources::siliconflow::create(
-            config.api_key,
-            config.model,
-        )),
-        "zhipu" => Box::new(astrbot_provider::sources::zhipu::create(
-            config.api_key,
-            config.model,
-        )),
-        "xai" => Box::new(astrbot_provider::sources::xai::create(
-            config.api_key,
-            config.model,
-        )),
-        "minimax" => Box::new(astrbot_provider::sources::minimax::create(
-            config.api_key,
-            config.model,
-        )),
-        "volcengine" => Box::new(astrbot_provider::sources::volcengine::create(
-            config.api_key,
-            config.model,
-        )),
-        "qwen" => Box::new(astrbot_provider::sources::qwen::create(
-            config.api_key,
-            config.model,
-        )),
-        "stepfun" => Box::new(astrbot_provider::sources::stepfun::create(
-            config.api_key,
-            config.model,
-        )),
-        "hyperbolic" => Box::new(astrbot_provider::sources::hyperbolic::create(
-            config.api_key,
-            config.model,
-        )),
-        "oneapi" => Box::new(astrbot_provider::sources::oneapi::create(
-            config.base_url,
-            config.api_key,
-            config.model,
-        )),
-        "lmstudio" => Box::new(astrbot_provider::sources::lmstudio::create(
-            config.base_url,
-            config.model,
-        )),
-        "ai21" => Box::new(astrbot_provider::sources::ai21::create(
-            config.api_key,
-            config.model,
-        )),
-        "azure" => Box::new(astrbot_provider::sources::azure::create(
-            config.api_key,
-            config.model,
-        )),
-        "baichuan" => Box::new(astrbot_provider::sources::baichuan::create(
-            config.api_key,
-            config.model,
-        )),
-        "cohere" => Box::new(astrbot_provider::sources::cohere::create(
-            config.api_key,
-            config.model,
-        )),
-        "fireworks" => Box::new(astrbot_provider::sources::fireworks::create(
-            config.api_key,
-            config.model,
-        )),
-        "perplexity" => Box::new(astrbot_provider::sources::perplexity::create(
-            config.api_key,
-            config.model,
-        )),
-        "together" => Box::new(astrbot_provider::sources::together::create(
-            config.api_key,
-            config.model,
-        )),
-        "zerooneai" => Box::new(astrbot_provider::sources::zerooneai::create(
-            config.api_key,
-            config.model,
-        )),
-        "baidu" => Box::new(astrbot_provider::sources::baidu::create(
-            config.api_key,
-            config.model,
-        )),
+        "moonshot" => Box::new(astrbot_provider::sources::moonshot::create(config.api_key, config.model)),
+        "deepseek" => Box::new(astrbot_provider::sources::deepseek::create(config.api_key, config.model)),
+        "groq" => Box::new(astrbot_provider::sources::groq::create(config.api_key, config.model)),
+        "openrouter" => Box::new(astrbot_provider::sources::openrouter::create(config.api_key, config.model)),
+        "siliconflow" => Box::new(astrbot_provider::sources::siliconflow::create(config.api_key, config.model)),
+        "zhipu" => Box::new(astrbot_provider::sources::zhipu::create(config.api_key, config.model)),
+        "xai" => Box::new(astrbot_provider::sources::xai::create(config.api_key, config.model)),
+        "minimax" => Box::new(astrbot_provider::sources::minimax::create(config.api_key, config.model)),
+        "volcengine" => Box::new(astrbot_provider::sources::volcengine::create(config.api_key, config.model)),
+        "qwen" => Box::new(astrbot_provider::sources::qwen::create(config.api_key, config.model)),
+        "stepfun" => Box::new(astrbot_provider::sources::stepfun::create(config.api_key, config.model)),
+        "hyperbolic" => Box::new(astrbot_provider::sources::hyperbolic::create(config.api_key, config.model)),
+        "oneapi" => Box::new(astrbot_provider::sources::oneapi::create(config.base_url, config.api_key, config.model)),
+        "lmstudio" => Box::new(astrbot_provider::sources::lmstudio::create(config.base_url, config.model)),
+        "ai21" => Box::new(astrbot_provider::sources::ai21::create(config.api_key, config.model)),
+        "azure" => Box::new(astrbot_provider::sources::azure::create(config.api_key, config.model)),
+        "baichuan" => Box::new(astrbot_provider::sources::baichuan::create(config.api_key, config.model)),
+        "cohere" => Box::new(astrbot_provider::sources::cohere::create(config.api_key, config.model)),
+        "fireworks" => Box::new(astrbot_provider::sources::fireworks::create(config.api_key, config.model)),
+        "perplexity" => Box::new(astrbot_provider::sources::perplexity::create(config.api_key, config.model)),
+        "together" => Box::new(astrbot_provider::sources::together::create(config.api_key, config.model)),
+        "zerooneai" => Box::new(astrbot_provider::sources::zerooneai::create(config.api_key, config.model)),
+        "baidu" => Box::new(astrbot_provider::sources::baidu::create(config.api_key, config.model)),
         _ => {
             return json!({
                 "success": false,
@@ -515,11 +417,14 @@ async fn list_platforms(State(state): State<AppState>) -> Json<Value> {
     Json(json!({"platforms": *state.platforms.read().await}))
 }
 
-async fn get_platform(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
+async fn get_platform(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Json<Value> {
     let platforms = state.platforms.read().await;
-    let platform = platforms
-        .iter()
-        .find(|p| p.get("id").and_then(|v| v.as_str()) == Some(&id));
+    let platform = platforms.iter().find(|p| {
+        p.get("id").and_then(|v| v.as_str()) == Some(&id)
+    });
     Json(platform.cloned().unwrap_or(Value::Null))
 }
 
@@ -529,10 +434,9 @@ async fn update_platform(
     Json(body): Json<Value>,
 ) -> Json<Value> {
     let mut platforms = state.platforms.write().await;
-    if let Some(idx) = platforms
-        .iter()
-        .position(|p| p.get("id").and_then(|v| v.as_str()) == Some(&id))
-    {
+    if let Some(idx) = platforms.iter().position(|p| {
+        p.get("id").and_then(|v| v.as_str()) == Some(&id)
+    }) {
         let mut updated = platforms[idx].clone();
         if let Some(obj) = updated.as_object_mut() {
             if let Some(body_obj) = body.as_object() {
@@ -540,10 +444,7 @@ async fn update_platform(
                     obj.insert(key.clone(), val.clone());
                 }
             }
-            obj.insert(
-                "updated_at".to_string(),
-                json!(format!("{:?}", std::time::SystemTime::now())),
-            );
+            obj.insert("updated_at".to_string(), json!(format!("{:?}", std::time::SystemTime::now())));
         }
         platforms[idx] = updated.clone();
         return Json(json!({"success": true, "updated": id, "platform": updated}));
@@ -557,62 +458,67 @@ async fn list_plugins(State(state): State<AppState>) -> Json<Value> {
     Json(json!({"plugins": *state.plugins.read().await}))
 }
 
-async fn install_plugin(State(state): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
-    let plugin_id = body
-        .get("id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+async fn install_plugin(
+    State(state): State<AppState>,
+    Json(body): Json<Value>,
+) -> Json<Value> {
+    let plugin_id = body.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
     if plugin_id.is_empty() {
         return Json(json!({"success": false, "error": "Plugin id is required"}));
     }
 
     let mut plugins = state.plugins.write().await;
-    let exists = plugins
-        .iter()
-        .any(|p| p.get("id").and_then(|v| v.as_str()) == Some(&plugin_id));
+    let exists = plugins.iter().any(|p| p.get("id").and_then(|v| v.as_str()) == Some(&plugin_id));
     if exists {
-        return Json(
-            json!({"success": false, "error": format!("Plugin '{}' already installed", plugin_id)}),
-        );
+        return Json(json!({"success": false, "error": format!("Plugin '{}' already installed", plugin_id)}));
     }
 
     let mut plugin = body.clone();
     if let Some(obj) = plugin.as_object_mut() {
         obj.entry("enabled".to_string()).or_insert(json!(true));
-        obj.entry("installed_at".to_string())
-            .or_insert(json!(format!("{:?}", std::time::SystemTime::now())));
+        obj.entry("installed_at".to_string()).or_insert(json!(format!("{:?}", std::time::SystemTime::now())));
     }
     plugins.push(plugin.clone());
+    broadcast_plugin_change(&state, &plugin_id, "install", true).await;
     Json(json!({"success": true, "plugin": plugin}))
 }
 
-async fn get_plugin(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
+async fn get_plugin(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Json<Value> {
     let plugins = state.plugins.read().await;
-    let plugin = plugins
-        .iter()
-        .find(|p| p.get("id").and_then(|v| v.as_str()) == Some(&id));
+    let plugin = plugins.iter().find(|p| {
+        p.get("id").and_then(|v| v.as_str()) == Some(&id)
+    });
     Json(plugin.cloned().unwrap_or(Value::Null))
 }
 
-async fn uninstall_plugin(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
+async fn uninstall_plugin(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Json<Value> {
     let mut plugins = state.plugins.write().await;
     let len_before = plugins.len();
     plugins.retain(|p| p.get("id").and_then(|v| v.as_str()) != Some(&id));
     let deleted = plugins.len() < len_before;
+    if deleted {
+        broadcast_plugin_change(&state, &id, "uninstall", true).await;
+    }
     Json(json!({"success": deleted, "uninstalled": id}))
 }
 
-async fn toggle_plugin(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
+async fn toggle_plugin(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Json<Value> {
     let mut plugins = state.plugins.write().await;
-    match plugins
-        .iter_mut()
-        .find(|p| p.get("id").and_then(|v| v.as_str()) == Some(&id))
-    {
+    match plugins.iter_mut().find(|p| p.get("id").and_then(|v| v.as_str()) == Some(&id)) {
         Some(plugin) => {
             if let Some(obj) = plugin.as_object_mut() {
                 let current = obj.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
                 obj.insert("enabled".to_string(), json!(!current));
+                broadcast_plugin_change(&state, &id, "toggle", true).await;
                 return Json(json!({"success": true, "plugin_id": id, "enabled": !current}));
             }
             Json(json!({"success": false, "error": "Invalid plugin structure"}))
@@ -626,8 +532,7 @@ async fn toggle_plugin(State(state): State<AppState>, Path(id): Path<String>) ->
 async fn list_personas(State(state): State<AppState>) -> Json<Value> {
     let mgr = state.persona_manager.lock().unwrap();
     let personas = mgr.list_personas();
-    let persona_jsons: Vec<Value> = personas
-        .into_iter()
+    let persona_jsons: Vec<Value> = personas.into_iter()
         .map(|p| serde_json::to_value(p).unwrap())
         .collect();
     Json(json!({"personas": persona_jsons}))
@@ -639,7 +544,10 @@ async fn get_active_persona(State(state): State<AppState>) -> Json<Value> {
     Json(serde_json::to_value(persona).unwrap())
 }
 
-async fn create_persona(State(state): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
+async fn create_persona(
+    State(state): State<AppState>,
+    Json(body): Json<Value>,
+) -> Json<Value> {
     // Parse CustomPersonaRequest from JSON
     let req = match parse_custom_persona_request(body) {
         Ok(r) => r,
@@ -653,7 +561,10 @@ async fn create_persona(State(state): State<AppState>, Json(body): Json<Value>) 
     }
 }
 
-async fn get_persona(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
+async fn get_persona(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Json<Value> {
     let mgr = state.persona_manager.lock().unwrap();
     let personas = mgr.list_personas();
     let persona = personas.into_iter().find(|p| p.id == id);
@@ -683,7 +594,10 @@ async fn update_persona(
     }
 }
 
-async fn delete_persona(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
+async fn delete_persona(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Json<Value> {
     let mgr = state.persona_manager.lock().unwrap();
     match mgr.remove_persona(&id) {
         Ok(()) => Json(json!({"success": true, "deleted": id})),
@@ -691,7 +605,10 @@ async fn delete_persona(State(state): State<AppState>, Path(id): Path<String>) -
     }
 }
 
-async fn toggle_persona(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
+async fn toggle_persona(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Json<Value> {
     let mgr = state.persona_manager.lock().unwrap();
     match mgr.switch_persona(&id) {
         Ok(persona) => Json(json!({
@@ -704,106 +621,41 @@ async fn toggle_persona(State(state): State<AppState>, Path(id): Path<String>) -
 }
 
 fn parse_custom_persona_request(body: Value) -> Result<CustomPersonaRequest, String> {
-    let name = body
-        .get("name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let description = body
-        .get("description")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let tone = body
-        .get("tone")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
+    let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let description = body.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let tone = body.get("tone").and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
-    let catchphrases = body
-        .get("catchphrases")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
+    let catchphrases = body.get("catchphrases").and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
-    let taboos = body
-        .get("taboos")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
+    let taboos = body.get("taboos").and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
-    let switch_conditions = body
-        .get("switch_conditions")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
+    let switch_conditions = body.get("switch_conditions").and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
-    let system_prompt = body
-        .get("system_prompt")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-
-    let reply_style = body
-        .get("reply_style")
-        .and_then(|v| {
-            Some(ReplyStyle {
-                opening_pattern: v
-                    .get("opening_pattern")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                sentence_length: v
-                    .get("sentence_length")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                punctuation_style: v
-                    .get("punctuation_style")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                emoji_usage: v
-                    .get("emoji_usage")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                ending_pattern: v
-                    .get("ending_pattern")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-            })
+    let system_prompt = body.get("system_prompt").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    
+    let reply_style = body.get("reply_style").and_then(|v| {
+        Some(ReplyStyle {
+            opening_pattern: v.get("opening_pattern").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+            sentence_length: v.get("sentence_length").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+            punctuation_style: v.get("punctuation_style").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+            emoji_usage: v.get("emoji_usage").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+            ending_pattern: v.get("ending_pattern").and_then(|s| s.as_str()).unwrap_or("").to_string(),
         })
-        .unwrap_or(ReplyStyle {
-            opening_pattern: "".to_string(),
-            sentence_length: "".to_string(),
-            punctuation_style: "".to_string(),
-            emoji_usage: "".to_string(),
-            ending_pattern: "".to_string(),
-        });
+    }).unwrap_or(ReplyStyle {
+        opening_pattern: "".to_string(),
+        sentence_length: "".to_string(),
+        punctuation_style: "".to_string(),
+        emoji_usage: "".to_string(),
+        ending_pattern: "".to_string(),
+    });
 
     Ok(CustomPersonaRequest {
-        name,
-        description,
-        tone,
-        catchphrases,
-        taboos,
-        switch_conditions,
-        system_prompt,
-        reply_style,
+        name, description, tone, catchphrases, taboos,
+        switch_conditions, system_prompt, reply_style,
     })
 }
 
@@ -818,25 +670,32 @@ async fn delete_all_sessions(State(state): State<AppState>) -> Json<Value> {
     Json(json!({"success": true}))
 }
 
-async fn get_session(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
+async fn get_session(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Json<Value> {
     let sessions = state.sessions.read().await;
-    let session = sessions
-        .iter()
-        .find(|s| s.get("id").and_then(|v| v.as_str()) == Some(&id));
+    let session = sessions.iter().find(|s| {
+        s.get("id").and_then(|v| v.as_str()) == Some(&id)
+    });
     Json(session.cloned().unwrap_or(Value::Null))
 }
 
-async fn delete_session(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
+async fn delete_session(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Json<Value> {
     let mut sessions = state.sessions.write().await;
     sessions.retain(|s| s.get("id").and_then(|v| v.as_str()) != Some(&id));
     Json(json!({"success": true, "deleted": id}))
 }
 
-async fn get_session_history(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
+async fn get_session_history(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Json<Value> {
     let sessions = state.sessions.read().await;
-    let session = sessions
-        .iter()
-        .find(|s| s.get("id").and_then(|v| v.as_str()) == Some(&id));
+    let session = sessions.iter().find(|s| s.get("id").and_then(|v| v.as_str()) == Some(&id));
     let messages = session
         .and_then(|s| s.get("messages").cloned())
         .unwrap_or(json!([]));
@@ -850,14 +709,8 @@ async fn list_history(
     Query(params): Query<HashMap<String, String>>,
 ) -> Json<Value> {
     let sessions = state.sessions.read().await;
-    let limit = params
-        .get("limit")
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(50);
-    let offset = params
-        .get("offset")
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(0);
+    let limit = params.get("limit").and_then(|s| s.parse::<usize>().ok()).unwrap_or(50);
+    let offset = params.get("offset").and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
     let total = sessions.len();
     let paginated: Vec<Value> = sessions.iter().skip(offset).take(limit).cloned().collect();
     Json(json!({
@@ -869,11 +722,17 @@ async fn list_history(
     }))
 }
 
-async fn get_message(State(_state): State<AppState>, Path(_id): Path<String>) -> Json<Value> {
+async fn get_message(
+    State(_state): State<AppState>,
+    Path(_id): Path<String>,
+) -> Json<Value> {
     Json(Value::Null)
 }
 
-async fn delete_message(State(_state): State<AppState>, Path(_id): Path<String>) -> Json<Value> {
+async fn delete_message(
+    State(_state): State<AppState>,
+    Path(_id): Path<String>,
+) -> Json<Value> {
     Json(json!({"success": true}))
 }
 
@@ -883,7 +742,10 @@ async fn list_settings(State(state): State<AppState>) -> Json<Value> {
     Json(serde_json::to_value(&*state.config.read().await).unwrap_or_default())
 }
 
-async fn update_settings(State(state): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
+async fn update_settings(
+    State(state): State<AppState>,
+    Json(body): Json<Value>,
+) -> Json<Value> {
     match serde_json::from_value::<AstrBotConfig>(body) {
         Ok(new_cfg) => {
             let mut cfg = state.config.write().await;
@@ -894,7 +756,10 @@ async fn update_settings(State(state): State<AppState>, Json(body): Json<Value>)
     }
 }
 
-async fn get_setting(State(state): State<AppState>, Path(key): Path<String>) -> Json<Value> {
+async fn get_setting(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Json<Value> {
     let cfg = state.config.read().await;
     let cfg_val = serde_json::to_value(&*cfg).unwrap_or_default();
     Json(cfg_val.get(&key).cloned().unwrap_or(Value::Null))
@@ -944,47 +809,32 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             let req: Value = match serde_json::from_str(&text) {
                 Ok(v) => v,
                 Err(_) => {
-                    let _ = socket
-                        .send(WsMessage::Text(
-                            json!({
-                                "error": "Invalid JSON"
-                            })
-                            .to_string(),
-                        ))
-                        .await;
+                    let _ = socket.send(WsMessage::Text(json!({
+                        "error": "Invalid JSON"
+                    }).to_string())).await;
                     continue;
                 }
             };
 
-            let user_message = req
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let session_id = req
-                .get("session_id")
+            let user_message = req.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let session_id = req.get("session_id")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| format!("webchat_{}", Uuid::new_v4()));
 
             if user_message.is_empty() {
-                let _ = socket
-                    .send(WsMessage::Text(
-                        json!({
-                            "error": "message is required"
-                        })
-                        .to_string(),
-                    ))
-                    .await;
+                let _ = socket.send(WsMessage::Text(json!({
+                    "error": "message is required"
+                }).to_string())).await;
                 continue;
             }
 
             // Save user message to session (in-memory)
             {
                 let mut sessions = state.sessions.write().await;
-                let session = sessions
-                    .iter_mut()
-                    .find(|s| s.get("id").and_then(|v| v.as_str()) == Some(&session_id));
+                let session = sessions.iter_mut().find(|s| {
+                    s.get("id").and_then(|v| v.as_str()) == Some(&session_id)
+                });
                 if let Some(s) = session {
                     if let Some(obj) = s.as_object_mut() {
                         let msgs = obj.entry("messages").or_insert_with(|| json!([]));
@@ -1020,37 +870,17 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             // Find default provider and chat
             let provider_cfg = {
                 let providers = state.providers.read().await;
-                providers
-                    .iter()
-                    .find(|p| p.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true))
-                    .cloned()
+                providers.iter().find(|p| {
+                    p.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true)
+                }).cloned()
             };
 
             let reply = if let Some(cfg) = provider_cfg {
-                let provider_type = cfg
-                    .get("provider_type")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("openai");
-                let api_key = cfg
-                    .get("api_key")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let base_url = cfg
-                    .get("base_url")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let model = cfg
-                    .get("model")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let name = cfg
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or(provider_type)
-                    .to_string();
+                let provider_type = cfg.get("provider_type").and_then(|v| v.as_str()).unwrap_or("openai");
+                let api_key = cfg.get("api_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let base_url = cfg.get("base_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let model = cfg.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let name = cfg.get("name").and_then(|v| v.as_str()).unwrap_or(provider_type).to_string();
 
                 let config = ProviderConfig {
                     name: name.clone(),
@@ -1061,70 +891,22 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 };
 
                 let provider_result: Result<Box<dyn ChatProvider>, String> = match provider_type {
-                    "openai" => Ok(Box::new(astrbot_provider::OpenAiCompatibleProvider::new(
-                        config,
-                    ))),
-                    "moonshot" => Ok(Box::new(astrbot_provider::sources::moonshot::create(
-                        config.api_key,
-                        config.model,
-                    ))),
-                    "deepseek" => Ok(Box::new(astrbot_provider::sources::deepseek::create(
-                        config.api_key,
-                        config.model,
-                    ))),
-                    "groq" => Ok(Box::new(astrbot_provider::sources::groq::create(
-                        config.api_key,
-                        config.model,
-                    ))),
-                    "openrouter" => Ok(Box::new(astrbot_provider::sources::openrouter::create(
-                        config.api_key,
-                        config.model,
-                    ))),
-                    "siliconflow" => Ok(Box::new(astrbot_provider::sources::siliconflow::create(
-                        config.api_key,
-                        config.model,
-                    ))),
-                    "zhipu" => Ok(Box::new(astrbot_provider::sources::zhipu::create(
-                        config.api_key,
-                        config.model,
-                    ))),
-                    "xai" => Ok(Box::new(astrbot_provider::sources::xai::create(
-                        config.api_key,
-                        config.model,
-                    ))),
-                    "minimax" => Ok(Box::new(astrbot_provider::sources::minimax::create(
-                        config.api_key,
-                        config.model,
-                    ))),
-                    "volcengine" => Ok(Box::new(astrbot_provider::sources::volcengine::create(
-                        config.api_key,
-                        config.model,
-                    ))),
-                    "qwen" => Ok(Box::new(astrbot_provider::sources::qwen::create(
-                        config.api_key,
-                        config.model,
-                    ))),
-                    "stepfun" => Ok(Box::new(astrbot_provider::sources::stepfun::create(
-                        config.api_key,
-                        config.model,
-                    ))),
-                    "hyperbolic" => Ok(Box::new(astrbot_provider::sources::hyperbolic::create(
-                        config.api_key,
-                        config.model,
-                    ))),
-                    "oneapi" => Ok(Box::new(astrbot_provider::sources::oneapi::create(
-                        config.base_url,
-                        config.api_key,
-                        config.model,
-                    ))),
-                    "lmstudio" => Ok(Box::new(astrbot_provider::sources::lmstudio::create(
-                        config.base_url,
-                        config.model,
-                    ))),
-                    _ => Err(format!(
-                        "[Provider type '{}' not supported in WebChat]",
-                        provider_type
-                    )),
+                    "openai" => Ok(Box::new(astrbot_provider::OpenAiCompatibleProvider::new(config))),
+                    "moonshot" => Ok(Box::new(astrbot_provider::sources::moonshot::create(config.api_key, config.model))),
+                    "deepseek" => Ok(Box::new(astrbot_provider::sources::deepseek::create(config.api_key, config.model))),
+                    "groq" => Ok(Box::new(astrbot_provider::sources::groq::create(config.api_key, config.model))),
+                    "openrouter" => Ok(Box::new(astrbot_provider::sources::openrouter::create(config.api_key, config.model))),
+                    "siliconflow" => Ok(Box::new(astrbot_provider::sources::siliconflow::create(config.api_key, config.model))),
+                    "zhipu" => Ok(Box::new(astrbot_provider::sources::zhipu::create(config.api_key, config.model))),
+                    "xai" => Ok(Box::new(astrbot_provider::sources::xai::create(config.api_key, config.model))),
+                    "minimax" => Ok(Box::new(astrbot_provider::sources::minimax::create(config.api_key, config.model))),
+                    "volcengine" => Ok(Box::new(astrbot_provider::sources::volcengine::create(config.api_key, config.model))),
+                    "qwen" => Ok(Box::new(astrbot_provider::sources::qwen::create(config.api_key, config.model))),
+                    "stepfun" => Ok(Box::new(astrbot_provider::sources::stepfun::create(config.api_key, config.model))),
+                    "hyperbolic" => Ok(Box::new(astrbot_provider::sources::hyperbolic::create(config.api_key, config.model))),
+                    "oneapi" => Ok(Box::new(astrbot_provider::sources::oneapi::create(config.base_url, config.api_key, config.model))),
+                    "lmstudio" => Ok(Box::new(astrbot_provider::sources::lmstudio::create(config.base_url, config.model))),
+                    _ => Err(format!("[Provider type '{}' not supported in WebChat]", provider_type))
                 };
 
                 match provider_result {
@@ -1136,7 +918,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                             Err(e) => format!("[Error: {}]", e),
                         }
                     }
-                    Err(err_msg) => err_msg,
+                    Err(err_msg) => err_msg
                 }
             } else {
                 "[No provider configured. Please add a provider in Dashboard.]".to_string()
@@ -1145,10 +927,9 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             // Save assistant reply to session
             {
                 let mut sessions = state.sessions.write().await;
-                if let Some(s) = sessions
-                    .iter_mut()
-                    .find(|s| s.get("id").and_then(|v| v.as_str()) == Some(&session_id))
-                {
+                if let Some(s) = sessions.iter_mut().find(|s| {
+                    s.get("id").and_then(|v| v.as_str()) == Some(&session_id)
+                }) {
                     if let Some(obj) = s.as_object_mut() {
                         let msgs = obj.entry("messages").or_insert_with(|| json!([]));
                         if let Some(arr) = msgs.as_array_mut() {
@@ -1159,10 +940,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                                 "created_at": chrono::Utc::now().to_rfc3339()
                             }));
                         }
-                        obj.insert(
-                            "updated_at".to_string(),
-                            json!(chrono::Utc::now().to_rfc3339()),
-                        );
+                        obj.insert("updated_at".to_string(), json!(chrono::Utc::now().to_rfc3339()));
                     }
                 }
             }
@@ -1174,198 +952,9 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 "done": true
             });
 
-            if socket
-                .send(WsMessage::Text(resp.to_string()))
-                .await
-                .is_err()
-            {
+            if socket.send(WsMessage::Text(resp.to_string())).await.is_err() {
                 break;
             }
         }
-    }
-}
-
-// ========== 新增路由 handlers ==========
-
-async fn list_knowledge() -> Json<Value> {
-    Json(json!({"knowledge_bases": [{"id": "kb_default", "name": "Default Knowledge Base", "description": "General knowledge for the bot", "document_count": 12, "total_chunks": 3847, "embedding_model": "text-embedding-3-small", "vector_store": "sqlite", "created_at": "2026-04-20T08:00:00Z", "last_updated": "2026-04-28T06:00:00Z", "status": "active"}], "total": 1, "rag_enabled": true, "default_kb": "kb_default"}))
-}
-
-async fn list_knowledge_docs(Path(_id): Path<String>) -> Json<Value> {
-    Json(json!({"knowledge_base_id": _id, "documents": [{"id": "doc_001", "filename": "getting_started.md", "size_bytes": 12450, "chunks": 42, "status": "indexed", "uploaded_at": "2026-04-20T08:15:00Z", "source_type": "markdown"}], "total": 1, "total_chunks": 42}))
-}
-
-async fn list_tools() -> Json<Value> {
-    Json(json!({"tools": [{"name": "echo", "description": "Echo back the input text", "parameters": [], "requires_confirmation": false, "returns": "string"}, {"name": "current_time", "description": "Get current date and time", "parameters": [], "requires_confirmation": false, "returns": "string"}], "total": 2}))
-}
-
-async fn list_backups() -> Json<Value> {
-    Json(json!({"backups": [], "total": 0, "backup_dir": "./backups", "note": "Backup manager not yet wired"}))
-}
-
-async fn get_stats(State(state): State<AppState>) -> Json<Value> {
-    let config = state.config.read().await;
-    Json(json!({"platforms": [], "metrics": {}, "summary": {"total_sessions": 0, "db_connected": false, "config_loaded": true, "providers_count": config.providers.len(), "platforms_count": config.platforms.len()}}))
-}
-
-async fn list_mcp() -> Json<Value> {
-    Json(json!({"mcp_servers": [], "total": 0}))
-}
-
-async fn list_agents() -> Json<Value> {
-    Json(json!({"agents": [], "total": 0, "enabled_count": 0}))
-}
-
-async fn get_safety() -> Json<Value> {
-    Json(json!({"safety": {"status": "active", "strategies_count": 0, "stop_on_first": true}, "note": "Safety engine skeleton"}))
-}
-
-async fn list_webhooks() -> Json<Value> {
-    Json(json!({"webhooks": [], "total": 0, "enabled_count": 0}))
-}
-
-// ========== Tests ==========
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::{
-        body::Body,
-        http::{Request, StatusCode},
-    };
-    use tower::util::ServiceExt;
-
-    fn test_state() -> AppState {
-        let mut state = AppState::new();
-        let providers = vec![
-            json!({"id": "openai", "provider_type": "openai", "enabled": true, "api_key": "sk-test", "model": "gpt-4o-mini"}),
-            json!({"id": "deepseek", "provider_type": "deepseek", "enabled": false}),
-        ];
-        let platforms = vec![json!({"id": "qq", "platform_type": "qq", "enabled": true})];
-        let plugins = vec![json!({"id": "weather", "enabled": true})];
-        state.providers = Arc::new(RwLock::new(providers));
-        state.platforms = Arc::new(RwLock::new(platforms));
-        state.plugins = Arc::new(RwLock::new(plugins));
-        state
-    }
-
-    fn test_router() -> Router {
-        build_router(test_state())
-    }
-
-    #[tokio::test]
-    async fn test_health_check() {
-        let app = test_router();
-        let response = app.oneshot(Request::builder().uri("/api/health").body(Body::empty()).unwrap()).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn test_status() {
-        let app = test_router();
-        let response = app.oneshot(Request::builder().uri("/api/status").body(Body::empty()).unwrap()).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let json: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["status"], "running");
-    }
-
-    #[tokio::test]
-    async fn test_config_get() {
-        let app = test_router();
-        let response = app.oneshot(Request::builder().uri("/api/config").body(Body::empty()).unwrap()).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn test_providers_list() {
-        let app = test_router();
-        let response = app.oneshot(Request::builder().uri("/api/providers").body(Body::empty()).unwrap()).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let json: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["providers"].as_array().unwrap().len(), 2);
-    }
-
-    #[tokio::test]
-    async fn test_platforms_list() {
-        let app = test_router();
-        let response = app.oneshot(Request::builder().uri("/api/platforms").body(Body::empty()).unwrap()).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let json: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["platforms"].as_array().unwrap().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_plugins_list() {
-        let app = test_router();
-        let response = app.oneshot(Request::builder().uri("/api/plugins").body(Body::empty()).unwrap()).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let json: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["plugins"].as_array().unwrap().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_knowledge_list() {
-        let app = test_router();
-        let response = app.oneshot(Request::builder().uri("/api/knowledge").body(Body::empty()).unwrap()).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let json: Value = serde_json::from_slice(&body).unwrap();
-        assert!(json["knowledge_bases"].is_array());
-    }
-
-    #[tokio::test]
-    async fn test_tools_list() {
-        let app = test_router();
-        let response = app.oneshot(Request::builder().uri("/api/tools").body(Body::empty()).unwrap()).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let json: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["total"], 2);
-    }
-
-    #[tokio::test]
-    async fn test_backups_list() {
-        let app = test_router();
-        let response = app.oneshot(Request::builder().uri("/api/backups").body(Body::empty()).unwrap()).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn test_stats() {
-        let app = test_router();
-        let response = app.oneshot(Request::builder().uri("/api/stats").body(Body::empty()).unwrap()).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn test_mcp_list() {
-        let app = test_router();
-        let response = app.oneshot(Request::builder().uri("/api/mcp").body(Body::empty()).unwrap()).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn test_agents_list() {
-        let app = test_router();
-        let response = app.oneshot(Request::builder().uri("/api/agents").body(Body::empty()).unwrap()).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn test_safety() {
-        let app = test_router();
-        let response = app.oneshot(Request::builder().uri("/api/safety").body(Body::empty()).unwrap()).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn test_webhooks_list() {
-        let app = test_router();
-        let response = app.oneshot(Request::builder().uri("/api/webhooks").body(Body::empty()).unwrap()).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
     }
 }
