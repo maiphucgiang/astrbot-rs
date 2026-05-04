@@ -1,6 +1,7 @@
 use astrbot_core::errors::{AstrBotError, Result};
 use astrbot_core::provider::{ChatConfig, ChatMessage, ChatResponse, ChatStreamChunk, Provider};
 use futures_util::Stream;
+use std::sync::Arc;
 use tracing::{info, warn};
 
 /// Unified LLM client that wraps a provider
@@ -104,7 +105,7 @@ impl LLMClient {
 
 /// ProviderManager - manages multiple LLM providers with fallback support
 pub struct ProviderManager {
-    providers: Vec<Box<dyn Provider>>,
+    providers: Vec<Arc<dyn Provider>>,
     active_provider: Option<usize>,
     fallback_chain: Vec<usize>,
 }
@@ -120,7 +121,7 @@ impl ProviderManager {
     }
 
     /// Register a provider
-    pub fn register(&mut self, provider: Box<dyn Provider>) {
+    pub fn register(&mut self, provider: Arc<dyn Provider>) {
         let idx = self.providers.len();
         self.providers.push(provider);
         if self.active_provider.is_none() {

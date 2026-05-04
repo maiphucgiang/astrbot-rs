@@ -25,7 +25,7 @@ pub mod process;
 pub mod respond;
 
 pub use process::ProcessStage;
-pub use respond::RespondStage;
+pub use respond::{RespondStage, SendFn};
 
 // ---------------------------------------------------------------------------
 // PipelineContext

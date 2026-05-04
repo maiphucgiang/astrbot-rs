@@ -11,7 +11,8 @@ use std::task::{Context, Poll};
 use tokio::sync::broadcast;
 use tokio::time::{interval, Duration};
 
-use crate::routes::AppState;
+use crate::server::AppState;
+use crate::sse::DashboardEvent;
 
 /// Log broadcast channel — holds the last N log lines
 pub struct LogBroadcaster {
@@ -41,7 +42,7 @@ impl Default for LogBroadcaster {
 
 /// SSE stream for real-time logs
 pub struct LogStream {
-    rx: broadcast::Receiver<String>,
+    rx: broadcast::Receiver<DashboardEvent>,
     heartbeat: tokio::time::Interval,
 }
 
@@ -50,8 +51,10 @@ impl Stream for LogStream {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.rx.try_recv() {
-            Ok(line) => {
-                return Poll::Ready(Some(Ok(Event::default().data(line))));
+            Ok(event) => {
+                if let Ok(evt) = event.to_sse_event() {
+                    return Poll::Ready(Some(Ok(evt)));
+                }
             }
             Err(broadcast::error::TryRecvError::Empty) => {}
             Err(_) => {
@@ -70,7 +73,7 @@ impl Stream for LogStream {
 
 /// Handler for SSE log stream
 pub async fn log_stream_handler(State(state): State<Arc<AppState>>) -> Sse<LogStream> {
-    let rx = if let Some(ref broadcaster) = state.log_broadcaster {
+    let rx = if let Some(ref broadcaster) = state.sse_broadcaster {
         broadcaster.subscribe()
     } else {
         let (_, rx) = broadcast::channel(1);

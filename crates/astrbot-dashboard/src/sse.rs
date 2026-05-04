@@ -52,7 +52,7 @@ impl DashboardEvent {
 
 pub struct SseClient {
     pub id: String,
-    rx: broadcast::Receiver<DashboardEvent>,
+    pub rx: broadcast::Receiver<DashboardEvent>,
 }
 
 pub struct SseBroadcaster {
@@ -75,6 +75,10 @@ impl SseBroadcaster {
         let mut clients = self.clients.write().await;
         clients.insert(id.clone(), ());
         SseClient { id, rx }
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<DashboardEvent> {
+        self.tx.subscribe()
     }
 
     pub async fn remove_client(&self, client_id: &str) {

@@ -1,0 +1,122 @@
+diff --git a/crates/astrbot-core/src/agent/context/manager.rs b/crates/astrbot-core/src/agent/context/manager.rs
+index 1fc6edf..e4ef946 100644
+--- a/crates/astrbot-core/src/agent/context/manager.rs
++++ b/crates/astrbot-core/src/agent/context/manager.rs
+@@ -1,5 +1,7 @@
+-use crate::agent::context::{TokenCounter, ContextCompressor, ContextTruncator};
+-use crate::provider::ChatMessage as Message;
++use crate::agent::context::token_counter::TokenCounter;
++use crate::agent::context::compressor::ContextCompressor;
++use crate::agent::context::truncator::ContextTruncator;
++use crate::message::Message;
+ 
+ pub struct ContextManager {
+     counter: TokenCounter,
+diff --git a/crates/astrbot-core/src/kb/manager.rs b/crates/astrbot-core/src/kb/manager.rs
+index e5cabbd..7277f21 100644
+--- a/crates/astrbot-core/src/kb/manager.rs
++++ b/crates/astrbot-core/src/kb/manager.rs
+@@ -1,7 +1,7 @@
+ //! Knowledge Base Manager — create / delete / list KBs + provide per-KB tool instances.
+ 
+ use crate::errors::{AstrBotError, Result};
+-use crate::provider::Provider;
++use crate::rag::embedding_provider::EmbeddingProvider;
+ use crate::rag::Retriever;
+ use crate::tools::kb_tools::{DocChunkMap, KbDeleteTool, KbIndexTool, KbSearchTool};
+ use crate::tools::ToolResult;
+@@ -32,8 +32,7 @@ impl Default for KbConfig {
+ /// Manager for multiple knowledge bases.
+ pub struct KbManager {
+     store: Arc<dyn VectorStore>,
+-    provider: Arc<dyn Provider>,
+-    embedding_model: String,
++    provider: Arc<dyn EmbeddingProvider>,
+     configs: DashMap<String, KbConfig>,
+     kb_doc_chunks: DashMap<String, DocChunkMap>,
+ }
+@@ -41,13 +40,11 @@ pub struct KbManager {
+ impl KbManager {
+     pub fn new(
+         store: Arc<dyn VectorStore>,
+-        provider: Arc<dyn Provider>,
+-        embedding_model: impl Into<String>,
++        provider: Arc<dyn EmbeddingProvider>,
+     ) -> Self {
+         Self {
+             store,
+             provider,
+-            embedding_model: embedding_model.into(),
+             configs: DashMap::new(),
+             kb_doc_chunks: DashMap::new(),
+         }
+@@ -108,7 +105,6 @@ impl KbManager {
+ 
+         let retriever = Arc::new(Retriever::new(
+             self.provider.clone(),
+-            self.embedding_model.clone(),
+             self.store.clone(),
+             config.collection.clone(),
+             config.top_k,
+@@ -132,7 +128,7 @@ mod tests {
+     fn test_manager() -> (Arc<MockProvider>, Arc<dyn VectorStore>, KbManager) {
+         let provider = Arc::new(MockProvider::new("mock-emb", "MockEmbedding"));
+         let store: Arc<dyn VectorStore> = Arc::new(MemoryVectorStore::new());
+-        let manager = KbManager::new(store.clone(), provider.clone(), "mock-model");
++        let manager = KbManager::new(store.clone(), provider.clone());
+         (provider, store, manager)
+     }
+ 
+diff --git a/crates/astrbot-core/src/testing/mod.rs b/crates/astrbot-core/src/testing/mod.rs
+index 770ca55..4302bea 100644
+--- a/crates/astrbot-core/src/testing/mod.rs
++++ b/crates/astrbot-core/src/testing/mod.rs
+@@ -19,6 +19,7 @@ use crate::platform::{MessageSource, PlatformMetadata, PlatformType};
+ use crate::provider::{
+     ChatConfig, ChatMessage, ChatResponse, ChatStreamChunk, ModelInfo, Provider,
+ };
++use crate::rag::embedding_provider::EmbeddingProvider;
+ use async_trait::async_trait;
+ use std::collections::HashMap;
+ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+@@ -187,6 +188,40 @@ impl Provider for MockProvider {
+     }
+ }
+ 
++#[async_trait]
++impl EmbeddingProvider for MockProvider {
++    fn id(&self) -> &str {
++        &self.id
++    }
++
++    fn name(&self) -> &str {
++        &self.name
++    }
++
++    async fn embed(&self, text: &str) -> Result<Vec<f32>> {
++        let results = self.batch_embed(vec![text.to_string()]).await?;
++        results.into_iter().next().ok_or_else(|| crate::errors::AstrBotError::Internal("Empty embedding".to_string()))
++    }
++
++    async fn batch_embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
++        if !self.embeddings.is_empty() {
++            return Ok(self.embeddings.clone());
++        }
++        Ok(texts.iter().map(|t| self.generate_embedding(t)).collect())
++    }
++
++    async fn health_check(&self) -> Result<()> {
++        if self.should_fail_health {
++            Err(crate::errors::AstrBotError::Provider {
++                provider: self.name.clone(),
++                message: "Mock health failure".to_string(),
++            })
++        } else {
++            Ok(())
++        }
++    }
++}
++
+ // ───────────────────────────────────────────────
+ // MockPlatformAdapter
+ // ───────────────────────────────────────────────

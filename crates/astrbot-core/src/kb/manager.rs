@@ -2,10 +2,12 @@
 
 use crate::errors::{AstrBotError, Result};
 use crate::provider::Provider;
+use crate::rag::embedding::EmbeddingProvider;
 use crate::rag::Retriever;
 use crate::tools::kb_tools::{DocChunkMap, KbDeleteTool, KbIndexTool, KbSearchTool};
-use crate::tools::ToolResult;
+use crate::tools::{Tool, ToolResult};
 use crate::vector_store::VectorStore;
+use async_trait::async_trait;
 use dashmap::DashMap;
 use std::sync::Arc;
 
@@ -29,11 +31,28 @@ impl Default for KbConfig {
     }
 }
 
+/// Adapter that wraps a `Provider` into an `EmbeddingProvider`.
+struct ProviderEmbeddingAdapter {
+    provider: Arc<dyn Provider>,
+    model: String,
+}
+
+#[async_trait]
+impl EmbeddingProvider for ProviderEmbeddingAdapter {
+    fn id(&self) -> &str { self.provider.id() }
+    fn name(&self) -> &str { self.provider.name() }
+    async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
+        self.provider.embedding(texts, Some(self.model.clone())).await
+    }
+    async fn health_check(&self) -> Result<bool> {
+        self.provider.health_check().await
+    }
+}
+
 /// Manager for multiple knowledge bases.
 pub struct KbManager {
     store: Arc<dyn VectorStore>,
-    provider: Arc<dyn Provider>,
-    embedding_model: String,
+    embedding: Arc<dyn crate::rag::embedding::EmbeddingProvider>,
     configs: DashMap<String, KbConfig>,
     kb_doc_chunks: DashMap<String, DocChunkMap>,
 }
@@ -41,13 +60,11 @@ pub struct KbManager {
 impl KbManager {
     pub fn new(
         store: Arc<dyn VectorStore>,
-        provider: Arc<dyn Provider>,
-        embedding_model: impl Into<String>,
+        embedding: Arc<dyn crate::rag::embedding::EmbeddingProvider>,
     ) -> Self {
         Self {
             store,
-            provider,
-            embedding_model: embedding_model.into(),
+            embedding,
             configs: DashMap::new(),
             kb_doc_chunks: DashMap::new(),
         }
@@ -106,9 +123,10 @@ impl KbManager {
         let config = self.configs.get(name)?.clone();
         let doc_chunks = self.kb_doc_chunks.get(name)?.clone();
 
+        let embedding = self.embedding.clone();
+
         let retriever = Arc::new(Retriever::new(
-            self.provider.clone(),
-            self.embedding_model.clone(),
+            embedding,
             self.store.clone(),
             config.collection.clone(),
             config.top_k,
@@ -131,8 +149,12 @@ mod tests {
 
     fn test_manager() -> (Arc<MockProvider>, Arc<dyn VectorStore>, KbManager) {
         let provider = Arc::new(MockProvider::new("mock-emb", "MockEmbedding"));
+        let embedding: Arc<dyn EmbeddingProvider> = Arc::new(ProviderEmbeddingAdapter {
+            provider: provider.clone(),
+            model: "mock-model".to_string(),
+        });
         let store: Arc<dyn VectorStore> = Arc::new(MemoryVectorStore::new());
-        let manager = KbManager::new(store.clone(), provider.clone(), "mock-model");
+        let manager = KbManager::new(store.clone(), embedding);
         (provider, store, manager)
     }
 

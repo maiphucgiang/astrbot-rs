@@ -2,6 +2,7 @@ mod runtime;
 
 use clap::{Parser, Subcommand};
 use std::path::Path;
+use std::sync::Arc;
 use tracing::{error, info, warn};
 
 #[derive(Parser)]
@@ -165,7 +166,7 @@ async fn cmd_run(config_path: String, daemon: bool) -> anyhow::Result<()> {
     if daemon {
         info!("Running in daemon mode (not yet implemented)");
     }
-    let mut runtime = crate::runtime::BotRuntime::new();
+    let mut runtime = crate::runtime::BotRuntime::new(std::path::PathBuf::from("plugins"));
     let cfg = match astrbot_core::config::AstrBotConfig::from_file(&config_path).await {
         Ok(c) => {
             info!("Loaded config from {}", config_path);
@@ -392,7 +393,7 @@ async fn cmd_dashboard(port: u16, _config: &str) -> anyhow::Result<()> {
 
 async fn cmd_test(provider_id: &str, api_key: Option<&str>) -> anyhow::Result<()> {
     info!("Testing provider: {}", provider_id);
-    let mut runtime = crate::runtime::BotRuntime::new();
+    let mut runtime = crate::runtime::BotRuntime::new(std::path::PathBuf::from("plugins"));
     let key = api_key
         .map(|s| s.to_string())
         .unwrap_or_else(|| {
@@ -404,7 +405,7 @@ async fn cmd_test(provider_id: &str, api_key: Option<&str>) -> anyhow::Result<()
         "https://api.openai.com".to_string(),
         "gpt-4o-mini".to_string(),
     );
-    runtime.provider_manager.register(Box::new(test_provider));
+    runtime.provider_manager.register(Arc::new(test_provider));
     let providers = runtime.provider_manager.list();
     if providers.is_empty() {
         anyhow::bail!("No providers registered");

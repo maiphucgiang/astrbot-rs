@@ -230,7 +230,7 @@ async fn update_config_key(
     let mut cfg = state.config.write().await;
     let mut cfg_val = serde_json::to_value(&*cfg).unwrap_or_default();
     if let Some(obj) = cfg_val.as_object_mut() {
-        obj.insert(key, body);
+        obj.insert(key.clone(), body);
     }
     match serde_json::from_value::<AstrBotConfig>(cfg_val) {
         Ok(new_cfg) => {

@@ -11,12 +11,21 @@ use std::sync::Arc;
 use tracing::{error, info};
 
 /// A loaded plugin with lifecycle tracking.
-#[derive(Debug)]
 pub struct LoadedStar {
     pub star: Star,
     pub lifecycle: PluginLifecycle,
     pub loaded_at: u64,
     pub last_error: Option<String>,
+}
+
+impl std::fmt::Debug for LoadedStar {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoadedStar")
+            .field("lifecycle", &self.lifecycle)
+            .field("loaded_at", &self.loaded_at)
+            .field("last_error", &self.last_error)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Summary info for external queries.

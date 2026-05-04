@@ -40,7 +40,7 @@ impl SystemMetrics {
 
 fn get_memory_info() -> (u64, u64) {
     use sysinfo::{RefreshKind, System};
-    let mut sys = System::new_with_specifics(RefreshKind::new().with_memory());
+    let mut sys = System::new_with_specifics(RefreshKind::new().with_memory(sysinfo::MemoryRefreshKind::everything()));
     sys.refresh_memory();
     (sys.used_memory() / 1024 / 1024, sys.total_memory() / 1024 / 1024)
 }
