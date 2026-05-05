@@ -203,3 +203,14 @@ impl Star {
         }
     }
 }
+
+/// Trait for dispatching messages to plugins from the pipeline.
+/// Implemented by PluginManager in astrbot-plugin crate.
+#[async_trait]
+pub trait PluginDispatcher: Send + Sync {
+    async fn dispatch_message(
+        &self,
+        message: &crate::message::AstrBotMessage,
+        source: &crate::platform::MessageSource,
+    ) -> Vec<(String, crate::errors::Result<crate::message::MessageEventResult>)>;
+}

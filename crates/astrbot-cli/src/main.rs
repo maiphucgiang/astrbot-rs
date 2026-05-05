@@ -194,6 +194,7 @@ async fn cmd_run(config_path: String, daemon: bool) -> anyhow::Result<()> {
         }
     }
     info!("Registered {} providers", runtime.provider_manager.list().len());
+    runtime.start().await?;
     for platform_cfg in &cfg.platforms {
         if !platform_cfg.enabled {
             continue;

@@ -5,17 +5,19 @@ use tracing::{info, warn};
 
 use crate::agent::{AgentContext, AgentRegistry, AgentResult, ToolCall};
 use crate::errors::Result;
-use crate::message::{AstrBotMessage, MessageChain};
+use crate::message::{AstrBotMessage, MessageChain, MessageEventResult, MessageMember, MessageType};
 use crate::pipeline::{PipelineContext, PipelineEvent, Stage, StageFlow};
 use crate::platform::{MessageSource, PlatformType};
+use crate::plugin::PluginDispatcher;
 use crate::provider::{ChatConfig, ChatMessage, Provider};
 
 /// ProcessStage — 核心消息处理阶段
 ///
 /// 职责：
-/// 1. 组装 messages context（session history + system prompt）
-/// 2. Agent Runner 调用（ToolLoop/Coze/Dify/Dashscope/DeerFlow）
-/// 3. ChatProvider 路由（LLM 直接调用兜底）
+/// 1. 插件消息拦截 (PluginManager::dispatch_message)
+/// 2. 组装 messages context（session history + system prompt）
+/// 3. Agent Runner 调用（ToolLoop/Coze/Dify/Dashscope/DeerFlow）
+/// 4. ChatProvider 路由（LLM 直接调用兜底）
 pub struct ProcessStage {
     /// 默认 LLM Provider（兜底路由）
     default_provider: Option<Arc<dyn Provider>>,
@@ -27,6 +29,8 @@ pub struct ProcessStage {
     session_history: Arc<tokio::sync::Mutex<HashMap<String, Vec<ChatMessage>>>>,
     /// 默认 Agent ID（优先走 Agent Runner）
     default_agent_id: Option<String>,
+    /// 插件管理器（消息拦截）
+    plugin_manager: Option<Arc<dyn PluginDispatcher>>,
 }
 
 impl ProcessStage {
@@ -37,6 +41,7 @@ impl ProcessStage {
             system_prompt: None,
             session_history: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             default_agent_id: None,
+            plugin_manager: None,
         }
     }
 
@@ -64,9 +69,53 @@ impl ProcessStage {
         self
     }
 
+    /// 设置插件管理器
+    pub fn with_plugin_manager(mut self, pm: Arc<dyn PluginDispatcher>) -> Self {
+        self.plugin_manager = Some(pm);
+        self
+    }
+
     /// 从 PipelineEvent 提取用户输入文本
     fn extract_user_input(&self, event: &PipelineEvent) -> String {
         event.message.chain.plain_text()
+    }
+
+    /// 尝试插件拦截。如果插件处理了消息，返回 true（跳过 provider）
+    async fn try_plugin_intercept(&self, event: &mut PipelineEvent) -> Result<bool> {
+        let pm = match self.plugin_manager.as_ref() {
+            Some(pm) => pm,
+            None => return Ok(false),
+        };
+
+        let source = MessageSource {
+            platform: event.message.platform,
+            session_id: event.message.session_id.clone(),
+            message_id: event.message.message_id.clone(),
+            user_id: event.message.sender.user_id.clone(),
+        };
+
+        let results = pm.dispatch_message(&event.message, &source).await;
+
+        for (id, result) in results {
+            match result {
+                Ok(MessageEventResult::Reply { chain }) => {
+                    info!("[ProcessStage] plugin {} replied", id);
+                    event.result_chain = Some(chain);
+                    return Ok(true);
+                }
+                Ok(MessageEventResult::Forward { target: _, chain }) => {
+                    info!("[ProcessStage] plugin {} forwarded message", id);
+                    event.result_chain = Some(chain);
+                    return Ok(true);
+                }
+                Ok(MessageEventResult::Nothing) => {}
+                Err(e) => {
+                    warn!("[ProcessStage] plugin {} error: {}", id, e);
+                }
+            }
+        }
+
+        Ok(false)
     }
 
     /// 构建 ChatMessage 上下文（history + current）
@@ -177,6 +226,7 @@ impl ProcessStage {
 #[async_trait]
 impl Stage for ProcessStage {
     async fn initialize(&mut self, _ctx: &PipelineContext) -> Result<()> {
+        // PipelineContext 暂无 plugin_manager 字段，跳过初始化
         Ok(())
     }
 
@@ -191,7 +241,12 @@ impl Stage for ProcessStage {
             event.message.sender.user_id
         );
 
-        // 构建消息上下文
+        // 1. 插件消息拦截 — 如果插件返回响应，直接跳过 provider
+        if self.try_plugin_intercept(event).await? {
+            return Ok(StageFlow::Done);
+        }
+
+        // 2. 构建消息上下文
         let messages = self.build_messages(event).await;
 
         // 优先走 Agent Runner
@@ -247,7 +302,7 @@ impl Stage for ProcessStage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::message::{MessageMember, MessageType};
+    use crate::message::MessageMember;
     use crate::platform::{MessageSource, PlatformType};
     use crate::provider::{ChatResponse, ModelInfo, TokenUsage};
     use crate::testing::MockProvider;
@@ -309,7 +364,6 @@ mod tests {
         stage.process(&mut event1).await.unwrap();
 
         let mut event2 = make_test_event("Message 2");
-        // 使用相同 session_id，历史应该保留
         stage.process(&mut event2).await.unwrap();
 
         let history = stage.session_history.lock().await;

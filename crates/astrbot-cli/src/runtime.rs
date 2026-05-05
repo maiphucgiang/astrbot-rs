@@ -86,6 +86,14 @@ impl BotRuntime {
         info!("[Runtime] Stopping all components...");
         Ok(())
     }
+
+    /// Start the bot — build pipeline with a stub sender, then bind platform adapters.
+    pub async fn start(&mut self) -> anyhow::Result<()> {
+        let sender: SendFn = Arc::new(|_, _| Box::pin(async move { Ok(()) }));
+        self.build_pipeline(sender).await?;
+        info!("[Runtime] Bot started — pipeline ready");
+        Ok(())
+    }
 }
 
 impl Default for BotRuntime {
