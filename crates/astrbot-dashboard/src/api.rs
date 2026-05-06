@@ -1,8 +1,13 @@
-use axum::{extract::State, Json};
+//! Dashboard API handlers — enhanced status, config, and SSE broadcast integration
+
+use axum::{
+    extract::State,
+    Json,
+};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use crate::server::AppState;
+use crate::app_state::AppState;
 use crate::sse::{DashboardEvent, SseBroadcaster};
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -25,29 +30,44 @@ impl SystemMetrics {
             Some(ref b) => b.client_count().await,
             None => 0,
         };
+        let providers = if let Some(ref pvm) = state.provider_manager {
+            let lock = pvm.read().await;
+            lock.list().len()
+        } else { 0 };
+        let platforms = {
+            let cfg = state.config.read().await;
+            cfg.platforms.len()
+        };
+        let plugins = if let Some(ref pm) = state.plugin_manager {
+            let lock = pm.read().await;
+            lock.list().len()
+        } else { 0 };
+
         Self {
             uptime_seconds: uptime,
             version: env!("CARGO_PKG_VERSION").to_string(),
             memory_used_mb: mem_used,
             memory_total_mb: mem_total,
             sse_client_count: sse_clients,
-            providers_count: state.providers.read().await.len(),
-            platforms_count: state.platforms.read().await.len(),
-            plugins_count: state.plugins.read().await.len(),
+            providers_count: providers,
+            platforms_count: platforms,
+            plugins_count: plugins,
         }
     }
 }
 
 fn get_memory_info() -> (u64, u64) {
-    use sysinfo::{RefreshKind, System};
+    use sysinfo::{System, RefreshKind};
     let mut sys = System::new_with_specifics(RefreshKind::new().with_memory(sysinfo::MemoryRefreshKind::everything()));
     sys.refresh_memory();
-    (sys.used_memory() / 1024 / 1024, sys.total_memory() / 1024 / 1024)
+    let used = sys.used_memory() / 1024 / 1024;
+    let total = sys.total_memory() / 1024 / 1024;
+    (used, total)
 }
 
 pub async fn broadcast_config_update(state: &AppState, updated_keys: Vec<String>) {
     if let Some(ref b) = state.sse_broadcaster {
-        b.broadcast_config_update(updated_keys, Some("dashboard_api".into()));
+        b.broadcast_config_update(updated_keys, Some("dashboard_api".to_string()));
     }
 }
 
@@ -65,7 +85,10 @@ pub async fn broadcast_plugin_change(state: &AppState, plugin_id: &str, action: 
 
 pub async fn get_enhanced_status(State(state): State<AppState>) -> Json<Value> {
     let metrics = SystemMetrics::from_state(&state).await;
-    Json(json!({ "status": "running", "metrics": metrics }))
+    Json(json!({
+        "status": "running",
+        "metrics": metrics,
+    }))
 }
 
 pub async fn update_config_with_broadcast(
@@ -77,10 +100,13 @@ pub async fn update_config_with_broadcast(
             let mut cfg = state.config.write().await;
             *cfg = new_cfg;
             drop(cfg);
-            let persist = state.save_config().await;
-            let keys: Vec<String> = body.as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();
-            broadcast_config_update(&state, keys).await;
-            match persist {
+            let persist_result = state.save_config().await;
+            let updated_keys: Vec<String> = body
+                .as_object()
+                .map(|obj| obj.keys().cloned().collect())
+                .unwrap_or_default();
+            broadcast_config_update(&state, updated_keys).await;
+            match persist_result {
                 Ok(_) => Json(json!({"success": true, "persisted": true})),
                 Err(e) => Json(json!({"success": true, "persisted": false, "warning": e.to_string()})),
             }
@@ -95,51 +121,63 @@ mod tests {
     use crate::sse::SseBroadcaster;
 
     fn test_state() -> AppState {
-        let mut s = AppState::new();
-        s.sse_broadcaster = Some(Arc::new(SseBroadcaster::new(10)));
-        s
+        let mut state = AppState::new("test");
+        state.sse_broadcaster = Some(Arc::new(SseBroadcaster::new(10)));
+        state
     }
 
     #[tokio::test]
     async fn test_metrics_from_state() {
-        let s = test_state();
-        let m = SystemMetrics::from_state(&s).await;
+        let state = test_state();
+        let m = SystemMetrics::from_state(&state).await;
         assert!(m.uptime_seconds >= 0);
         assert_eq!(m.version, env!("CARGO_PKG_VERSION"));
         assert!(m.memory_total_mb > 0);
         assert_eq!(m.sse_client_count, 0);
+        assert_eq!(m.providers_count, 0);
+        assert_eq!(m.platforms_count, 0);
+        assert_eq!(m.plugins_count, 0);
     }
 
     #[tokio::test]
     async fn test_broadcast_config_update_reaches_client() {
-        let s = test_state();
-        let mut rx = s.sse_broadcaster.as_ref().unwrap().add_client().await.rx;
-        broadcast_config_update(&s, vec!["providers".into(), "nickname".into()]).await;
-        assert!(matches!(rx.try_recv().unwrap(), DashboardEvent::ConfigUpdate { .. }));
+        let state = test_state();
+        let b = state.sse_broadcaster.as_ref().unwrap();
+        let client = b.add_client().await;
+        let mut rx = client.rx;
+        broadcast_config_update(&state, vec!["providers".to_string(), "nickname".to_string()]).await;
+        let received = rx.try_recv().expect("should receive event");
+        assert!(matches!(received, DashboardEvent::ConfigUpdate { .. }));
     }
 
     #[tokio::test]
     async fn test_broadcast_provider_status_reaches_client() {
-        let s = test_state();
-        let mut rx = s.sse_broadcaster.as_ref().unwrap().add_client().await.rx;
-        broadcast_provider_status(&s, "openai", "connected", None).await;
-        assert!(matches!(rx.try_recv().unwrap(), DashboardEvent::ProviderStatusChange { .. }));
+        let state = test_state();
+        let b = state.sse_broadcaster.as_ref().unwrap();
+        let client = b.add_client().await;
+        let mut rx = client.rx;
+        broadcast_provider_status(&state, "openai", "connected", None).await;
+        let received = rx.try_recv().expect("should receive event");
+        assert!(matches!(received, DashboardEvent::ProviderStatusChange { .. }));
     }
 
     #[tokio::test]
     async fn test_broadcast_plugin_change_reaches_client() {
-        let s = test_state();
-        let mut rx = s.sse_broadcaster.as_ref().unwrap().add_client().await.rx;
-        broadcast_plugin_change(&s, "weather", "install", true).await;
-        assert!(matches!(rx.try_recv().unwrap(), DashboardEvent::PluginInstall { .. }));
+        let state = test_state();
+        let b = state.sse_broadcaster.as_ref().unwrap();
+        let client = b.add_client().await;
+        let mut rx = client.rx;
+        broadcast_plugin_change(&state, "weather", "install", true).await;
+        let received = rx.try_recv().expect("should receive event");
+        assert!(matches!(received, DashboardEvent::PluginInstall { .. }));
     }
 
     #[tokio::test]
     async fn test_broadcast_without_broadcaster_does_not_panic() {
-        let mut s = AppState::new();
-        s.sse_broadcaster = None;
-        broadcast_config_update(&s, vec!["x".into()]).await;
-        broadcast_provider_status(&s, "p", "ok", None).await;
-        broadcast_plugin_change(&s, "pl", "install", true).await;
+        let mut state = AppState::new("test");
+        state.sse_broadcaster = None;
+        broadcast_config_update(&state, vec!["x".into()]).await;
+        broadcast_provider_status(&state, "p", "ok", None).await;
+        broadcast_plugin_change(&state, "pl", "install", true).await;
     }
 }

@@ -189,6 +189,7 @@ dependencies = [
  "anyhow",
  "astrbot-core",
  "astrbot-persona",
+ "astrbot-plugin",
  "astrbot-provider",
  "axum",
  "chrono",

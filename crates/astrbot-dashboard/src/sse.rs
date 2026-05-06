@@ -14,7 +14,7 @@ use tokio::sync::{broadcast, RwLock};
 use tokio::time::{interval, Duration};
 use uuid::Uuid;
 
-use crate::server::AppState;
+use crate::app_state::AppState;
 
 /// Dashboard 实时事件类型
 #[derive(Clone, Debug, serde::Serialize)]

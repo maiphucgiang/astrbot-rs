@@ -300,6 +300,19 @@ impl Database {
         Ok(result.rows_affected())
     }
 
+    /// Delete all sessions and messages
+    pub async fn delete_all_sessions(&self) -> Result<u64> {
+        let result = sqlx::query("DELETE FROM message_history")
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AstrBotError::Internal(format!("Failed to delete all messages: {}", e)))?;
+        let _ = sqlx::query("DELETE FROM sessions")
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AstrBotError::Internal(format!("Failed to delete all sessions: {}", e)))?;
+        Ok(result.rows_affected())
+    }
+
     /// Delete old messages
     pub async fn delete_old_messages(&self, before: DateTime<Utc>) -> Result<u64> {
         let before_str = before.to_rfc3339();
@@ -486,7 +499,7 @@ pub struct PersonaRecord {
 }
 
 /// Session record
-#[derive(Debug, Clone, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow, serde::Serialize)]
 pub struct Session {
     pub id: String,
     pub platform: String,

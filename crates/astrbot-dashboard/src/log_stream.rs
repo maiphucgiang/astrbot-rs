@@ -11,7 +11,7 @@ use std::task::{Context, Poll};
 use tokio::sync::broadcast;
 use tokio::time::{interval, Duration};
 
-use crate::server::AppState;
+use crate::app_state::AppState;
 use crate::sse::DashboardEvent;
 
 /// Log broadcast channel — holds the last N log lines
