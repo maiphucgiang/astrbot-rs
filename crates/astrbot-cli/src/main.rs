@@ -184,7 +184,7 @@ async fn cmd_run(config_path: String, daemon: bool) -> anyhow::Result<()> {
         if !provider_cfg.enabled {
             continue;
         }
-        if provider_cfg.provider_type == "openai_compatible" {
+        if provider_cfg.provider_type == "openai_compatible" || provider_cfg.provider_type == "openai" {
             runtime.register_openai_provider(
                 &provider_cfg.id,
                 provider_cfg.api_key.as_deref().unwrap_or(""),
@@ -204,8 +204,9 @@ async fn cmd_run(config_path: String, daemon: bool) -> anyhow::Result<()> {
             platform_cfg.id, platform_cfg.platform_type
         );
     }
+    let pipeline = runtime.pipeline.clone();
     tokio::spawn(async move {
-        astrbot_dashboard::server::start_server().await;
+        astrbot_dashboard::server::start_server(pipeline).await;
     });
     tokio::signal::ctrl_c().await?;
     info!("Shutting down...");
@@ -388,7 +389,7 @@ async fn cmd_validate(config_path: &str) -> anyhow::Result<()> {
 async fn cmd_dashboard(port: u16, _config: &str) -> anyhow::Result<()> {
     info!("Starting dashboard on port {}", port);
     println!("🚀 Dashboard starting on http://0.0.0.0:{}", port);
-    astrbot_dashboard::server::start_server().await;
+    astrbot_dashboard::server::start_server(None).await;
     Ok(())
 }
 

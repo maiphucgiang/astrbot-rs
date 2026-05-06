@@ -17,8 +17,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub async fn start_server() {
-    let state = AppState::new(env!("CARGO_PKG_VERSION"));
+pub async fn start_server(pipeline: Option<Arc<astrbot_core::pipeline::PipelineScheduler>>) {
+    let mut state = AppState::new(env!("CARGO_PKG_VERSION"));
+    state.pipeline = pipeline;
     if let Err(e) = state.load_config().await {
         tracing::warn!("Failed to load config: {}", e);
     }
