@@ -1,31 +1,10 @@
-# Git
-.git
-.gitignore
-
-# Rust build artifacts
-target/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
+data/
 logs/
-
-# Documentation (not needed for build)
-docs/
-*.md
-
-# Test artifacts
-*.tmp
+plugins/
+**/node_modules/
+**/target/
+.git/
+*.log
+.env
 *.patch
-
-# Local config (mounted at runtime)
-config.json
+*.diff

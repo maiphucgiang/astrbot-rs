@@ -61,6 +61,9 @@ COPY crates/astrbot-persona/src crates/astrbot-persona/src
 COPY crates/astrbot-ux/src crates/astrbot-ux/src
 COPY crates/astrbot-feishu/src crates/astrbot-feishu/src
 
+# Copy dashboard dist (pre-built frontend)
+COPY crates/astrbot-dashboard/dashboard/dist crates/astrbot-dashboard/dashboard/dist
+
 # Touch main.rs to force rebuild
 RUN touch crates/astrbot-cli/src/main.rs
 
@@ -92,12 +95,33 @@ WORKDIR /app
 COPY --from=builder /usr/src/astrbot/target/release/astrbot /usr/local/bin/astrbot
 RUN chmod +x /usr/local/bin/astrbot
 
+# Copy dashboard dist for serving
+COPY --from=builder /usr/src/astrbot/crates/astrbot-dashboard/dashboard/dist /app/dashboard/dist
+
 # Create directories
 RUN mkdir -p /app/data /app/plugins /app/logs \
     && chown -R astrbot:astrbot /app
 
-# Copy default config if provided (optional)
-# COPY config.json /app/config.json
+# Write default config template
+RUN cat > /app/config.json.default << 'EOF'
+{
+  "server_port": 6185,
+  "default_provider_id": "default",
+  "providers": [
+    {
+      "id": "default",
+      "provider_type": "openai",
+      "api_key": "YOUR_API_KEY_HERE",
+      "base_url": "https://api.openai.com",
+      "model": "gpt-4o-mini",
+      "enabled": true
+    }
+  ],
+  "plugins": {},
+  "default_persona": "default",
+  "personas": {}
+}
+EOF
 
 USER astrbot
 
@@ -106,7 +130,7 @@ EXPOSE 6185
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD astrbot status || exit 1
+    CMD astrbot --version || exit 1
 
 # Default command
 ENTRYPOINT ["astrbot"]

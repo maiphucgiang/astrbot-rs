@@ -61,4 +61,18 @@ onMounted(refresh)
   color: #e8e8e8;
   cursor: pointer;
 }
+
+/* Shared utility classes */
+.btn { padding: 8px 16px; border-radius: 8px; border: none; background: #7c3aed; color: #fff; font-size: 13px; cursor: pointer; }
+.btn:hover { background: #a78bfa; }
+.btn-outline { background: transparent; border: 1px solid #2a2a3c; color: #9ca3af; }
+.btn-outline:hover { border-color: #a855f7; color: #a855f7; }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+.table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.table th, .table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #1a1a24; }
+.table th { color: #9ca3af; font-weight: 500; }
+.tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+.tag.on { background: #064e3b; color: #34d399; }
+.tag.off { background: #450a0a; color: #f87171; }
+.empty { color: #6b7280; text-align: center; padding: 16px 0; }
 </style>

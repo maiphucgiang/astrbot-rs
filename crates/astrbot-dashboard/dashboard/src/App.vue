@@ -16,6 +16,8 @@
       <Chat v-if="page === 'chat'" />
       <Status v-else-if="page === 'status'" />
       <Providers v-else-if="page === 'providers'" />
+      <Plugins v-else-if="page === 'plugins'" />
+      <Settings v-else-if="page === 'settings'" />
     </main>
   </div>
 </template>
@@ -25,6 +27,8 @@ import { ref, provide } from 'vue'
 import Chat from './Chat.vue'
 import Status from './Status.vue'
 import Providers from './Providers.vue'
+import Plugins from './Plugins.vue'
+import Settings from './Settings.vue'
 
 const page = ref('chat')
 const wsConnected = ref(false)
@@ -35,6 +39,8 @@ const nav = [
   { key: 'chat', label: '对话' },
   { key: 'status', label: '状态' },
   { key: 'providers', label: 'Providers' },
+  { key: 'plugins', label: '插件' },
+  { key: 'settings', label: '设置' },
 ]
 </script>
 

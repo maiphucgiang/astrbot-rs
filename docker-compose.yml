@@ -1,93 +1,23 @@
-# AstrBot-rs Docker Compose
+# AstrBot-rs Docker Compose (simplified)
 # Quick start: docker compose up -d
 # Build: docker compose build
 
+version: '3.8'
 services:
   astrbot:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        - CARGO_NET_GIT_FETCH_WITH_CLI=true
-    image: astrbot-rs:latest
-    container_name: astrbot
-    restart: unless-stopped
-
+    build: .
     ports:
       - "6185:6185"
-      # Optional: webhook ports for platform adapters
-      # - "3000:3000"   # Misskey / webhook generic
-      # - "3001:3001"   # Matrix / DingTalk / WeCom
-      # - "8080:8080"   # Custom bridge
-
     volumes:
-      - ./config.json:/app/config.json:ro
-      - astrbot-data:/app/data
-      - astrbot-plugins:/app/plugins
-      - astrbot-logs:/app/logs
-
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./plugins:/app/plugins
     environment:
       - RUST_LOG=info
-      - ASTRBOT_DASHBOARD_PORT=6185
       - TZ=Asia/Shanghai
-      # Provider API keys (set in .env or pass via -e)
-      # - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      # - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-
     healthcheck:
-      test: ["CMD", "astrbot", "status"]
+      test: ["CMD", "astrbot", "--version"]
       interval: 30s
-      timeout: 5s
+      timeout: 10s
       retries: 3
-      start_period: 60s
-
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 512M
-        reservations:
-          cpus: '0.5'
-          memory: 128M
-
-    security_opt:
-      - no-new-privileges:true
-
-    networks:
-      - astrbot-net
-
-  # Optional: PostgreSQL for persistent storage
-  # postgres:
-  #   image: postgres:16-alpine
-  #   container_name: astrbot-postgres
-  #   restart: unless-stopped
-  #   environment:
-  #     POSTGRES_USER: astrbot
-  #     POSTGRES_PASSWORD: changeme
-  #     POSTGRES_DB: astrbot
-  #   volumes:
-  #     - astrbot-pgdata:/var/lib/postgresql/data
-  #   networks:
-  #     - astrbot-net
-
-  # Optional: Redis for caching / session store
-  # redis:
-  #   image: redis:7-alpine
-  #   container_name: astrbot-redis
-  #   restart: unless-stopped
-  #   volumes:
-  #     - astrbot-redisdata:/data
-  #   networks:
-  #     - astrbot-net
-
-volumes:
-  astrbot-data:
-  astrbot-plugins:
-  astrbot-logs:
-  # astrbot-pgdata:
-  # astrbot-redisdata:
-
-networks:
-  astrbot-net:
-    driver: bridge
+    restart: unless-stopped
