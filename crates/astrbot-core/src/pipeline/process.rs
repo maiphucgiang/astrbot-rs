@@ -206,20 +206,28 @@ impl ProcessStage {
         }
     }
 
-    /// 调用 LLM Provider 兜底
-    async fn run_provider(&self, messages: Vec<ChatMessage>) -> Result<String> {
-        let provider = self
-            .default_provider
-            .as_ref()
-            .ok_or_else(|| crate::errors::AstrBotError::Internal("No provider configured".to_string()))?;
+    /// 调用 LLM Provider 兜底。失败时返回友好的错误提示文本，不传播 Err。
+    async fn run_provider(&self, messages: Vec<ChatMessage>) -> String {
+        let provider = match self.default_provider.as_ref() {
+            Some(p) => p,
+            None => {
+                warn!("[ProcessStage] No provider configured");
+                return "⚠️ 我还没有配置 AI 模型，请联系管理员添加 Provider。".to_string();
+            }
+        };
 
         let config = ChatConfig {
             stream: false,
             ..Default::default()
         };
 
-        let response = provider.chat(messages, config).await?;
-        Ok(response.content)
+        match provider.chat(messages, config).await {
+            Ok(response) => response.content,
+            Err(e) => {
+                warn!("[ProcessStage] Provider chat failed: {}", e);
+                format!("⚠️ AI 服务暂时不可用 ({})。请稍后再试。", e)
+            }
+        }
     }
 }
 
@@ -273,12 +281,12 @@ impl Stage for ProcessStage {
                         "Agent execution failed: {}, falling back to provider",
                         e
                     );
-                    self.run_provider(messages).await?
+                    self.run_provider(messages).await
                 }
             }
         } else {
             // 直接走 Provider 兜底
-            self.run_provider(messages).await?
+            self.run_provider(messages).await
         };
 
         // 组装回复消息链
@@ -342,6 +350,24 @@ mod tests {
         assert_eq!(
             event.result_chain.unwrap().plain_text(),
             "Hello from mock!"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_stage_provider_failure_fallback() {
+        let provider = Arc::new(MockProvider::new("mock", "Mock").with_chat_failure());
+        let stage = ProcessStage::new().with_provider(provider);
+
+        let mut event = make_test_event("Hi");
+        let flow = stage.process(&mut event).await.unwrap();
+
+        assert!(matches!(flow, StageFlow::Done));
+        assert!(event.result_chain.is_some());
+        let text = event.result_chain.unwrap().plain_text();
+        assert!(
+            text.contains("AI 服务暂时不可用") || text.contains("不可用"),
+            "Expected friendly error text, got: {}",
+            text
         );
     }
 

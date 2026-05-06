@@ -93,20 +93,19 @@ impl RespondStage {
         Duration::from_millis(ms.min(8000)) // 上限 8s
     }
 
-    /// 发送消息（带重试）
+    /// 发送消息（带重试）。sender 未配置时 graceful degradation，返回 Ok。
     async fn send_with_retry(
         &self,
         source: crate::platform::MessageSource,
         chain: MessageChain,
     ) -> Result<()> {
-        let sender = self
-            .sender
-            .as_ref()
-            .ok_or_else(|| {
-                crate::errors::AstrBotError::Internal(
-                    "Sender not configured".to_string(),
-                )
-            })?;
+        let sender = match self.sender.as_ref() {
+            Some(s) => s,
+            None => {
+                warn!("[RespondStage] Sender not configured — skipping send (graceful)");
+                return Ok(());
+            }
+        };
 
         for attempt in 0..=self.max_retries {
             let result = (sender)(source.clone(), chain.clone()).await;
@@ -206,14 +205,19 @@ impl Stage for RespondStage {
             event.message.platform,
         );
 
-        // 3. 发送（带重试）
+        // 3. 发送（带重试）。失败不 panic，graceful degradation。
         let source = crate::platform::MessageSource {
             platform: event.message.platform,
             session_id: event.message.session_id.clone(),
             message_id: event.message.message_id.clone(),
             user_id: event.message.sender.user_id.clone(),
         };
-        self.send_with_retry(source, formatted).await?;
+        if let Err(e) = self.send_with_retry(source, formatted).await {
+            warn!(
+                "[RespondStage] Send failed after all retries: {}. Message dropped gracefully.",
+                e
+            );
+        }
 
         Ok(StageFlow::Done)
     }
@@ -244,6 +248,17 @@ mod tests {
             raw_payload: None,
         };
         PipelineEvent::new(msg)
+    }
+
+    #[tokio::test]
+    async fn test_respond_stage_no_sender_graceful() {
+        // sender 未配置时应该 graceful degradation，不 panic，不 Err
+        let stage = RespondStage::new(); // 没有 with_sender
+        let mut event = make_test_event("trigger");
+        event.result_chain = Some(MessageChain::new().text("Hello!"));
+
+        let flow = stage.process(&mut event).await.unwrap();
+        assert!(matches!(flow, StageFlow::Done));
     }
 
     #[tokio::test]
