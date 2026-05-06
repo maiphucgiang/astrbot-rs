@@ -52,7 +52,7 @@ struct WechatShared {
     bridge_endpoint: String,
     api_token: Option<String>,
     http_client: reqwest::Client,
-    message_handler: HandlerRef,
+    message_handler: Arc<std::sync::Mutex<HandlerRef>>,
 }
 
 impl WechatShared {
@@ -132,10 +132,12 @@ async fn wechat_webhook_handler(
     axum::Json(payload): axum::Json<WechatWebhookPayload>,
 ) -> StatusCode {
     if let Some(msg) = shared.parse_webhook_payload(payload) {
-        if let Some(handler) = shared.message_handler.clone() {
+        let guard = shared.message_handler.lock().unwrap();
+        if let Some(ref handler) = *guard {
+            let handler_clone = handler.clone();
             let msg_clone = msg.clone();
             tokio::spawn(async move {
-                handler.on_message(msg_clone).await;
+                handler_clone.on_message(msg_clone).await;
             });
         }
     }
@@ -183,7 +185,7 @@ impl WechatPersonalAdapter {
             bridge_endpoint,
             api_token,
             http_client: reqwest::Client::new(),
-            message_handler: None,
+            message_handler: Arc::new(std::sync::Mutex::new(None)),
         });
         Self {
             metadata,
@@ -273,10 +275,8 @@ impl PlatformAdapter for WechatPersonalAdapter {
     }
 
     fn set_message_handler(&mut self, handler: Arc<dyn MessageHandler>) {
-        let shared_mut = Arc::get_mut(&mut self.shared).expect(
-            "set_message_handler must be called before start() when shared has only one owner",
-        );
-        shared_mut.message_handler = Some(handler);
+        let mut guard = self.shared.message_handler.lock().unwrap();
+        *guard = Some(handler);
     }
 }
 

@@ -30,6 +30,10 @@ services:
       - RUST_LOG=info
       - ASTRBOT_DASHBOARD_PORT=6185
       - TZ=Asia/Shanghai
+      # Provider API keys (set in .env or pass via -e)
+      # - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
 
     healthcheck:
       test: ["CMD", "astrbot", "status"]
