@@ -39,6 +39,7 @@ pub use config::*;
 pub use errors::*;
 pub use event::*;
 pub use message::*;
+pub use pipeline::*;
 pub use types::*;
 
 use serde::{Deserialize, Serialize};

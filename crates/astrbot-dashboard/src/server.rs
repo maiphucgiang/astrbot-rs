@@ -553,10 +553,18 @@ async fn chat_ws_handler(State(state): State<AppState>, ws: WebSocketUpgrade) ->
 }
 
 async fn handle_socket(mut socket: WebSocket, state: AppState) {
-    use astrbot_provider::ChatProvider;
+    use astrbot_core::pipeline::{PipelineEvent, PipelineScheduler};
+    use astrbot_core::message::{AstrBotMessage, MessageChain, MessageMember, MessageType};
+    use astrbot_core::platform::PlatformType;
     use uuid::Uuid;
 
-    let mut local_sessions: std::collections::HashMap<String, Vec<Value>> = std::collections::HashMap::new();
+    let pipeline = match &state.pipeline {
+        Some(p) => p.clone(),
+        None => {
+            let _ = socket.send(WsMessage::Text(json!({"error": "Pipeline not initialized"}).to_string())).await;
+            return;
+        }
+    };
 
     while let Some(Ok(msg)) = socket.recv().await {
         if let WsMessage::Text(text) = msg {
@@ -579,75 +587,55 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 continue;
             }
 
-            let entry = local_sessions.entry(session_id.clone()).or_insert_with(Vec::new);
-            entry.push(json!({
-                "id": format!("msg_{}", Uuid::new_v4()),
-                "role": "user",
-                "content": user_message.clone(),
-                "created_at": chrono::Utc::now().to_rfc3339()
-            }));
-
-            if let Some(ref db) = state.db {
-                let _ = db.create_session(&session_id, "webchat", &session_id, Some("WebChat")).await;
-                let _ = db.save_message(&session_id, None, "user", &user_message, None).await;
-            }
-
-            let provider_cfg = {
-                let cfg = state.config.read().await;
-                cfg.providers.iter().find(|p| p.enabled).cloned()
+            let msg_id = format!("webchat_msg_{}", Uuid::new_v4());
+            let astr_msg = AstrBotMessage {
+                message_id: msg_id,
+                timestamp: chrono::Utc::now(),
+                platform: PlatformType::Webchat,
+                session_id: session_id.clone(),
+                sender: MessageMember {
+                    user_id: "web_user".to_string(),
+                    nickname: Some("Web User".to_string()),
+                    card: None,
+                    role: None,
+                    is_self: false,
+                },
+                message_type: MessageType::Private,
+                chain: MessageChain::new().text(&user_message),
+                raw_payload: Some(req),
             };
 
-            let reply = if let Some(cfg) = provider_cfg {
-                let provider_result: Result<Box<dyn ChatProvider>, String> = match cfg.provider_type.as_str() {
-                    "openai" => {
-                        let provider_config = astrbot_provider::ProviderConfig {
-                            name: cfg.id.clone(),
-                            base_url: cfg.base_url.clone().unwrap_or_default(),
-                            api_key: cfg.api_key.clone().unwrap_or_default(),
-                            model: cfg.model.clone(),
-                            extra_headers: None,
-                        };
-                        Ok(Box::new(astrbot_provider::OpenAiCompatibleProvider::new(provider_config)))
-                    }
-                    _ => Err(format!("[Provider type '{}' not supported in WebChat]", cfg.provider_type)),
-                };
-
-                match provider_result {
-                    Ok(provider) => {
-                        let test_msg = astrbot_provider::ChatMessage::user(&user_message);
-                        let options = astrbot_provider::ChatOptions::default();
-                        match provider.chat(vec![test_msg], options).await {
-                            Ok(reply_text) => reply_text,
-                            Err(e) => format!("[Error: {}]", e),
+            let mut event = PipelineEvent::new(astr_msg);
+            match pipeline.execute(&mut event).await {
+                Ok(()) => {
+                    if let Some(ref chain) = event.result_chain {
+                        let reply_text = chain.plain_text();
+                        let resp = json!({
+                            "reply": reply_text,
+                            "session_id": session_id,
+                            "role": "assistant",
+                            "done": true
+                        });
+                        if socket.send(WsMessage::Text(resp.to_string())).await.is_err() {
+                            break;
                         }
+                    } else {
+                        let _ = socket.send(WsMessage::Text(json!({"reply": "", "session_id": session_id, "role": "assistant", "done": true}).to_string())).await;
                     }
-                    Err(err_msg) => err_msg
                 }
-            } else {
-                "[No provider configured. Please add a provider in Dashboard.]".to_string()
-            };
-
-            let entry = local_sessions.entry(session_id.clone()).or_insert_with(Vec::new);
-            entry.push(json!({
-                "id": format!("msg_{}", Uuid::new_v4()),
-                "role": "assistant",
-                "content": reply.clone(),
-                "created_at": chrono::Utc::now().to_rfc3339()
-            }));
-
-            if let Some(ref db) = state.db {
-                let _ = db.save_message(&session_id, None, "assistant", &reply, None).await;
-            }
-
-            let resp = json!({
-                "reply": reply,
-                "session_id": session_id,
-                "role": "assistant",
-                "done": true
-            });
-
-            if socket.send(WsMessage::Text(resp.to_string())).await.is_err() {
-                break;
+                Err(e) => {
+                    let error_msg = format!("Pipeline error: {}", e);
+                    let resp = json!({
+                        "reply": error_msg,
+                        "session_id": session_id,
+                        "role": "assistant",
+                        "done": true,
+                        "error": true
+                    });
+                    if socket.send(WsMessage::Text(resp.to_string())).await.is_err() {
+                        break;
+                    }
+                }
             }
         }
     }

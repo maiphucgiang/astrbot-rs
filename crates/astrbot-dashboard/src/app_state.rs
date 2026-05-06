@@ -17,7 +17,7 @@ pub struct AppState {
     pub sse_broadcaster: Option<Arc<SseBroadcaster>>,
     pub plugin_manager: Option<Arc<RwLock<PluginManager>>>,
     pub provider_manager: Option<Arc<RwLock<ProviderManager>>>,
-    pub pipeline: Option<Arc<dyn std::any::Any + Send + Sync>>,
+    pub pipeline: Option<Arc<astrbot_core::pipeline::PipelineScheduler>>,
     pub db: Option<Arc<astrbot_core::db::Database>>,
     pub jwt_secret: Option<String>,
     pub admin_password: Option<String>,
@@ -91,7 +91,7 @@ impl AppState {
         self
     }
 
-    pub fn with_pipeline(mut self, p: Arc<dyn std::any::Any + Send + Sync>) -> Self {
+    pub fn with_pipeline(mut self, p: Arc<astrbot_core::pipeline::PipelineScheduler>) -> Self {
         self.pipeline = Some(p);
         self
     }
