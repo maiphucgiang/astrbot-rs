@@ -311,16 +311,12 @@ fn parse_telegram_message(msg: &TelegramMessage) -> AstrBotMessage {
                 });
             }
         }
-
-        // If no entities at all, add the whole text as plain
-        if msg.entities.is_empty() && !text.is_empty() {
-            chain.0.push(MessageComponent::Plain { text: text.clone() });
-        }
     }
 
     AstrBotMessage {
         message_id: msg.message_id.to_string(),
-        timestamp: chrono::DateTime::from_timestamp(msg.date, 0).unwrap_or_else(chrono::Utc::now),
+        timestamp: chrono::DateTime::<chrono::Utc>::from_timestamp(msg.date, 0)
+            .unwrap_or_else(chrono::Utc::now),
         platform: PlatformType::Telegram,
         session_id: msg.chat.id.to_string(),
         sender,
@@ -679,44 +675,107 @@ impl PlatformAdapter for TelegramAdapter {
         let mut h = self.handler.lock().unwrap();
         *h = Some(handler);
     }
+}
 
-    async fn send_voice(&self, target: &MessageSource, data: Vec<u8>, format: &str) -> Result<()> {
-        if !self.running.load(Ordering::Relaxed) {
-            return Err(AstrBotError::Platform {
-                adapter: "Telegram".to_string(),
-                message: "adapter not running".to_string(),
-            });
-        }
-        let chat_id = &target.session_id;
-        let base_url = format!("{}/bot{}", self.api_base, self.bot_token);
-        let url = format!("{}/sendVoice", base_url);
-        let data_clone = data.clone();
-        let part = reqwest::multipart::Part::bytes(data)
-            .file_name(format!("voice.{}", format))
-            .mime_str(&format!("audio/{}", format))
-            .unwrap_or_else(|_| reqwest::multipart::Part::bytes(data_clone));
-        let form = reqwest::multipart::Form::new()
-            .text("chat_id", chat_id.clone())
-            .part("voice", part);
-        let response = self
-            .http_client
-            .post(&url)
-            .multipart(form)
-            .send()
-            .await
-            .map_err(|e| AstrBotError::Platform {
-                adapter: "Telegram".to_string(),
-                message: format!("HTTP request failed: {}", e),
-            })?;
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(AstrBotError::Platform {
-                adapter: "Telegram".to_string(),
-                message: format!("Telegram API error: {} - {}", status, body),
-            });
-        }
-        info!("[Telegram] Voice sent successfully");
-        Ok(())
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_telegram_adapter_new() {
+        let adapter = TelegramAdapter::new(
+            "test_token".to_string(),
+            None,
+            None,
+        );
+        assert_eq!(adapter.metadata.name, "Telegram");
+        assert!(adapter.metadata.enabled);
+        assert_eq!(adapter.metadata.platform_type, PlatformType::Telegram);
+    }
+
+    #[test]
+    fn test_parse_private_message() {
+        let tg_msg = TelegramMessage {
+            message_id: 42,
+            from: Some(TelegramUser {
+                id: 123456,
+                first_name: "Alice".to_string(),
+                last_name: None,
+                username: Some("alice_bot".to_string()),
+            }),
+            chat: TelegramChat {
+                id: 123456,
+                chat_type: "private".to_string(),
+                title: None,
+            },
+            date: 1700000000,
+            text: Some("hello world".to_string()),
+            photo: None,
+            voice: None,
+            document: None,
+            reply_to_message: None,
+            entities: vec![],
+        };
+
+        let astr_msg = parse_telegram_message(&tg_msg);
+        assert_eq!(astr_msg.message_id, "42");
+        assert_eq!(astr_msg.session_id, "123456");
+        assert_eq!(astr_msg.sender.user_id, "123456");
+        assert_eq!(astr_msg.sender.nickname, Some("alice_bot".to_string()));
+        assert_eq!(astr_msg.message_type, MessageType::Private);
+        assert_eq!(astr_msg.chain.plain_text(), "hello world");
+    }
+
+    #[test]
+    fn test_parse_group_message_with_mention() {
+        let tg_msg = TelegramMessage {
+            message_id: 99,
+            from: Some(TelegramUser {
+                id: 789,
+                first_name: "Bob".to_string(),
+                last_name: None,
+                username: None,
+            }),
+            chat: TelegramChat {
+                id: -1001234567890,
+                chat_type: "supergroup".to_string(),
+                title: Some("Test Group".to_string()),
+            },
+            date: 1700000000,
+            text: Some("hello @bot how are you".to_string()),
+            photo: None,
+            voice: None,
+            document: None,
+            reply_to_message: None,
+            entities: vec![
+                TelegramMessageEntity {
+                    entity_type: "mention".to_string(),
+                    offset: 6,
+                    length: 4,
+                },
+            ],
+        };
+
+        let astr_msg = parse_telegram_message(&tg_msg);
+        assert_eq!(astr_msg.session_id, "-1001234567890");
+        assert_eq!(astr_msg.message_type, MessageType::Group);
+        assert_eq!(astr_msg.sender.nickname, Some("Bob".to_string()));
+
+        let components = astr_msg.chain.components();
+        assert!(components.iter().any(|c| matches!(c, MessageComponent::At { target, .. } if target == "bot")));
+    }
+
+    #[test]
+    fn test_chain_to_text() {
+        let chain = MessageChain::new()
+            .text("Hello ")
+            .at("user123");
+        let (text, photo) = chain_to_telegram_text(&chain);
+        assert_eq!(text, "Hello @user123");
+        assert!(photo.is_none());
     }
 }
