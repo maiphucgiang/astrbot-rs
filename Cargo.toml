@@ -16,7 +16,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.88"
 authors = ["AstrBot Team <team@astrbot.rs>"]
 license = "AGPL-3.0"
 repository = "https://github.com/Last-emo-boy/astrbot-rs"
