@@ -27,7 +27,15 @@ impl Stage for E2eProcessStage {
     ) -> astrbot_core::errors::Result<StageFlow> {
         let user_text = event.message.chain.plain_text();
         let messages = vec![ChatMessage::user(user_text)];
-        let response = self.provider.as_ref().chat(messages, ChatConfig::default()).await?;
+        let config = ChatConfig {
+            model: None,
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            stream: false,
+            extra: std::collections::HashMap::new(),
+        };
+        let response = self.provider.as_ref().chat(messages, config).await?;
         event.result_chain = Some(MessageChain::new().text(response.content));
         Ok(StageFlow::Done)
     }
@@ -100,4 +108,127 @@ async fn test_e2e_basic_chat() {
     let captured = outputs.lock().unwrap();
     assert_eq!(captured.len(), 1, "应该有一条输出消息");
     assert_eq!(captured[0].plain_text(), "hi", "响应内容应该是 'hi'");
+}
+
+#[tokio::test]
+async fn test_e2e_with_plugin_intercept() {
+    let provider = Arc::new(MockProvider::new("mock", "Mock").with_chat_response("intercepted"));
+    let outputs = Arc::new(Mutex::new(Vec::new()));
+
+    let ctx = Arc::new(PipelineContext::new());
+    let mut registry = StageRegistry::new();
+    registry.register("WakingCheckStage", Box::new(WakingCheckStage::default()));
+    registry.register("ProcessStage", Box::new(E2eProcessStage { provider }));
+    registry.register("RespondStage", Box::new(E2eRespondStage {
+        outputs: outputs.clone(),
+    }));
+
+    registry.initialize_all(&ctx).await.unwrap();
+    let scheduler = PipelineScheduler::new(ctx, registry);
+
+    let message = AstrBotMessage {
+        message_id: "msg-2".to_string(),
+        timestamp: chrono::Utc::now(),
+        platform: PlatformType::Custom,
+        session_id: "session-2".to_string(),
+        sender: MessageMember {
+            user_id: "user-2".to_string(),
+            nickname: None,
+            card: None,
+            role: None,
+            is_self: false,
+        },
+        message_type: MessageType::Private,
+        chain: MessageChain::new().text("trigger"),
+        raw_payload: None,
+    };
+
+    let mut event = PipelineEvent::new(message);
+    scheduler.execute(&mut event).await.unwrap();
+
+    let captured = outputs.lock().unwrap();
+    assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0].plain_text(), "intercepted");
+}
+
+#[tokio::test]
+async fn test_e2e_empty_message() {
+    let provider = Arc::new(MockProvider::new("mock", "Mock").with_chat_response("empty"));
+    let outputs = Arc::new(Mutex::new(Vec::new()));
+
+    let ctx = Arc::new(PipelineContext::new());
+    let mut registry = StageRegistry::new();
+    registry.register("WakingCheckStage", Box::new(WakingCheckStage::default()));
+    registry.register("ProcessStage", Box::new(E2eProcessStage { provider }));
+    registry.register("RespondStage", Box::new(E2eRespondStage {
+        outputs: outputs.clone(),
+    }));
+
+    registry.initialize_all(&ctx).await.unwrap();
+    let scheduler = PipelineScheduler::new(ctx, registry);
+
+    let message = AstrBotMessage {
+        message_id: "msg-3".to_string(),
+        timestamp: chrono::Utc::now(),
+        platform: PlatformType::Custom,
+        session_id: "session-3".to_string(),
+        sender: MessageMember {
+            user_id: "user-3".to_string(),
+            nickname: None,
+            card: None,
+            role: None,
+            is_self: false,
+        },
+        message_type: MessageType::Private,
+        chain: MessageChain::new(),
+        raw_payload: None,
+    };
+
+    let mut event = PipelineEvent::new(message);
+    scheduler.execute(&mut event).await.unwrap();
+
+    let captured = outputs.lock().unwrap();
+    assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0].plain_text(), "empty");
+}
+
+#[tokio::test]
+async fn test_e2e_group_message() {
+    let provider = Arc::new(MockProvider::new("mock", "Mock").with_chat_response("group-reply"));
+    let outputs = Arc::new(Mutex::new(Vec::new()));
+
+    let ctx = Arc::new(PipelineContext::new());
+    let mut registry = StageRegistry::new();
+    registry.register("WakingCheckStage", Box::new(WakingCheckStage::default()));
+    registry.register("ProcessStage", Box::new(E2eProcessStage { provider }));
+    registry.register("RespondStage", Box::new(E2eRespondStage {
+        outputs: outputs.clone(),
+    }));
+
+    registry.initialize_all(&ctx).await.unwrap();
+    let scheduler = PipelineScheduler::new(ctx, registry);
+
+    let message = AstrBotMessage {
+        message_id: "msg-4".to_string(),
+        timestamp: chrono::Utc::now(),
+        platform: PlatformType::Custom,
+        session_id: "session-4".to_string(),
+        sender: MessageMember {
+            user_id: "user-4".to_string(),
+            nickname: None,
+            card: None,
+            role: None,
+            is_self: false,
+        },
+        message_type: MessageType::Private,
+        chain: MessageChain::new().text("group-hello"),
+        raw_payload: None,
+    };
+
+    let mut event = PipelineEvent::new(message);
+    scheduler.execute(&mut event).await.unwrap();
+
+    let captured = outputs.lock().unwrap();
+    assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0].plain_text(), "group-reply");
 }

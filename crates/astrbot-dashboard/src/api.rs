@@ -30,18 +30,18 @@ impl SystemMetrics {
             Some(ref b) => b.client_count().await,
             None => 0,
         };
-        let providers = if let Some(ref pvm) = state.provider_manager {
-            let lock = pvm.read().await;
+        let providers = {
+            let lock = state.provider_manager.read().await;
             lock.list().len()
-        } else { 0 };
+        };
         let platforms = {
             let cfg = state.config.read().await;
             cfg.platforms.len()
         };
-        let plugins = if let Some(ref pm) = state.plugin_manager {
-            let lock = pm.read().await;
+        let plugins = {
+            let lock = state.plugin_manager.read().await;
             lock.list().len()
-        } else { 0 };
+        };
 
         Self {
             uptime_seconds: uptime,
@@ -121,7 +121,9 @@ mod tests {
     use crate::sse::SseBroadcaster;
 
     fn test_state() -> AppState {
-        let mut state = AppState::new("test");
+        let plugin_manager = Arc::new(tokio::sync::RwLock::new(astrbot_plugin::PluginManager::new(std::path::PathBuf::from("plugins"))));
+        let provider_manager = Arc::new(tokio::sync::RwLock::new(astrbot_provider::client::ProviderManager::new()));
+        let mut state = AppState::new(plugin_manager, provider_manager);
         state.sse_broadcaster = Some(Arc::new(SseBroadcaster::new(10)));
         state
     }
@@ -174,7 +176,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_broadcast_without_broadcaster_does_not_panic() {
-        let mut state = AppState::new("test");
+        let plugin_manager = Arc::new(tokio::sync::RwLock::new(astrbot_plugin::PluginManager::new(std::path::PathBuf::from("plugins"))));
+        let provider_manager = Arc::new(tokio::sync::RwLock::new(astrbot_provider::client::ProviderManager::new()));
+        let mut state = AppState::new(plugin_manager, provider_manager);
         state.sse_broadcaster = None;
         broadcast_config_update(&state, vec!["x".into()]).await;
         broadcast_provider_status(&state, "p", "ok", None).await;

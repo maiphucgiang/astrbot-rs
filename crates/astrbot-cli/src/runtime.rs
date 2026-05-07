@@ -4,10 +4,27 @@ use astrbot_core::pipeline::{
     SessionStatusCheckStage, StageRegistry, WakingCheckStage, WhitelistCheckStage,
 };
 use astrbot_core::platform::MessageSource;
+use astrbot_core::message::{AstrBotMessage, MessageChain, MessageMember, MessageType};
+use astrbot_core::platform::PlatformType;
 use astrbot_plugin::manager::PluginManager;
 use astrbot_provider::client::ProviderManager;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{error, info, warn};
+use tokio::io::AsyncBufReadExt;
+
+/// ConsoleSender — prints AI replies to stdout
+pub struct ConsoleSender;
+
+impl ConsoleSender {
+    pub fn as_send_fn() -> SendFn {
+        Arc::new(|_src: MessageSource, chain: MessageChain| {
+            Box::pin(async move {
+                println!("[AI] {}", chain.plain_text());
+                Ok(())
+            })
+        })
+    }
+}
 
 /// Bot runtime — holds all components and manages lifecycle
 pub struct BotRuntime {
@@ -27,19 +44,18 @@ impl BotRuntime {
         }
     }
 
-    /// Register an OpenAI-compatible provider from config.
+    /// Register an OpenAI-compatible provider from config
     pub fn register_openai_provider(
         &mut self,
         id: &str,
         api_key: &str,
-        base_url: Option<&str>,
+        url: &str,
         model: &str,
     ) {
-        let url = base_url.unwrap_or("https://api.openai.com").to_string();
         let provider = astrbot_provider::openai::OpenAiProvider::new(
             id.to_string(),
             api_key.to_string(),
-            url,
+            url.to_string(),
             model.to_string(),
         );
         let arc = Arc::new(provider);
@@ -48,11 +64,8 @@ impl BotRuntime {
         info!("[Runtime] Registered OpenAI provider: {} (model: {})", id, model);
     }
 
-    /// Build the 9-stage pipeline with provider and sender bindings.
-    pub async fn build_pipeline(
-        &mut self,
-        sender: astrbot_core::pipeline::SendFn,
-    ) -> anyhow::Result<()> {
+    /// Build the 9-stage pipeline with provider and sender bindings
+    pub async fn build_pipeline(&mut self, sender: SendFn) -> anyhow::Result<()> {
         let ctx = Arc::new(PipelineContext::new());
         let mut registry = StageRegistry::new();
 
@@ -81,17 +94,73 @@ impl BotRuntime {
         Ok(())
     }
 
-    /// Graceful shutdown
-    pub async fn stop_all(&mut self) -> anyhow::Result<()> {
-        info!("[Runtime] Stopping all components...");
+    /// Start the bot — build pipeline, then run interactive console loop
+    pub async fn start(&mut self) -> anyhow::Result<()> {
+        let sender = ConsoleSender::as_send_fn();
+        self.build_pipeline(sender).await?;
+        let pipeline = self.pipeline.clone().unwrap();
+
+        info!("[Runtime] Bot started. Type messages and press Enter. Ctrl+C to exit.");
+
+        let stdin = tokio::io::stdin();
+        let mut reader = tokio::io::BufReader::new(stdin);
+        let mut line = String::new();
+
+        loop {
+            line.clear();
+            tokio::select! {
+                result = reader.read_line(&mut line) => {
+                    match result {
+                        Ok(0) => {
+                            info!("[Runtime] EOF received, shutting down...");
+                            break;
+                        }
+                        Ok(_) => {
+                            let trimmed = line.trim();
+                            if trimmed.is_empty() {
+                                continue;
+                            }
+                            let message = AstrBotMessage {
+                                message_id: format!("console-{}", chrono::Utc::now().timestamp_millis()),
+                                timestamp: chrono::Utc::now(),
+                                platform: PlatformType::Custom,
+                                session_id: "console-session".to_string(),
+                                sender: MessageMember {
+                                    user_id: "console-user".to_string(),
+                                    nickname: Some("User".to_string()),
+                                    card: None,
+                                    role: None,
+                                    is_self: false,
+                                },
+                                message_type: MessageType::Private,
+                                chain: MessageChain::new().text(trimmed.to_string()),
+                                raw_payload: None,
+                            };
+                            let mut event = astrbot_core::pipeline::PipelineEvent::new(message);
+                            if let Err(e) = pipeline.execute(&mut event).await {
+                                error!("[Runtime] Pipeline error: {}", e);
+                            }
+                        }
+                        Err(e) => {
+                            error!("[Runtime] stdin read error: {}", e);
+                            break;
+                        }
+                    }
+                }
+                _ = tokio::signal::ctrl_c() => {
+                    info!("[Runtime] Ctrl+C received, shutting down...");
+                    break;
+                }
+            }
+        }
+
+        self.stop_all().await?;
         Ok(())
     }
 
-    /// Start the bot — build pipeline with a stub sender, then bind platform adapters.
-    pub async fn start(&mut self) -> anyhow::Result<()> {
-        let sender: SendFn = Arc::new(|_, _| Box::pin(async move { Ok(()) }));
-        self.build_pipeline(sender).await?;
-        info!("[Runtime] Bot started — pipeline ready");
+    /// Graceful shutdown
+    pub async fn stop_all(&mut self) -> anyhow::Result<()> {
+        info!("[Runtime] Stopping all components...");
         Ok(())
     }
 }
@@ -99,5 +168,33 @@ impl BotRuntime {
 impl Default for BotRuntime {
     fn default() -> Self {
         Self::new(std::path::PathBuf::from("plugins"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_console_sender_prints() {
+        let sender = ConsoleSender::as_send_fn();
+        let source = MessageSource {
+            platform: PlatformType::Custom,
+            session_id: "test".to_string(),
+            message_id: "msg-1".to_string(),
+            user_id: "user-1".to_string(),
+        };
+        let chain = MessageChain::new().text("hello");
+        let result = sender(source, chain).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_runtime_default_build_pipeline() {
+        let mut runtime = BotRuntime::default();
+        let sender = ConsoleSender::as_send_fn();
+        let result = runtime.build_pipeline(sender).await;
+        assert!(result.is_ok());
+        assert!(runtime.pipeline.is_some());
     }
 }

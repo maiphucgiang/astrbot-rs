@@ -9,7 +9,7 @@ use crate::message::{AstrBotMessage, MessageChain, MessageEventResult, MessageMe
 use crate::pipeline::{PipelineContext, PipelineEvent, Stage, StageFlow};
 use crate::platform::{MessageSource, PlatformType};
 use crate::plugin::PluginDispatcher;
-use crate::provider::{ChatConfig, ChatMessage, Provider};
+use crate::provider::{ChatConfig, ChatMessage, ChatResponse, ChatStreamChunk, ModelInfo, Provider};
 
 /// ProcessStage — 核心消息处理阶段
 ///
@@ -103,8 +103,8 @@ impl ProcessStage {
                     event.result_chain = Some(chain);
                     return Ok(true);
                 }
-                Ok(MessageEventResult::Forward { target: _, chain }) => {
-                    info!("[ProcessStage] plugin {} forwarded message", id);
+                Ok(MessageEventResult::Forward { target, chain }) => {
+                    info!("[ProcessStage] plugin {} forwarded to {:?}", id, target);
                     event.result_chain = Some(chain);
                     return Ok(true);
                 }
@@ -206,35 +206,28 @@ impl ProcessStage {
         }
     }
 
-    /// 调用 LLM Provider 兜底。失败时返回友好的错误提示文本，不传播 Err。
-    async fn run_provider(&self, messages: Vec<ChatMessage>) -> String {
-        let provider = match self.default_provider.as_ref() {
-            Some(p) => p,
-            None => {
-                warn!("[ProcessStage] No provider configured");
-                return "⚠️ 我还没有配置 AI 模型，请联系管理员添加 Provider。".to_string();
-            }
-        };
+    /// 调用 LLM Provider 兜底
+    async fn run_provider(&self, messages: Vec<ChatMessage>) -> Result<String> {
+        let provider = self
+            .default_provider
+            .as_ref()
+            .ok_or_else(|| crate::errors::AstrBotError::Internal("No provider configured".to_string()))?;
 
         let config = ChatConfig {
             stream: false,
             ..Default::default()
         };
 
-        match provider.chat(messages, config).await {
-            Ok(response) => response.content,
-            Err(e) => {
-                warn!("[ProcessStage] Provider chat failed: {}", e);
-                format!("⚠️ AI 服务暂时不可用 ({})。请稍后再试。", e)
-            }
-        }
+        let response = provider.chat(messages, config).await?;
+        Ok(response.content)
     }
 }
 
 #[async_trait]
 impl Stage for ProcessStage {
     async fn initialize(&mut self, _ctx: &PipelineContext) -> Result<()> {
-        // PipelineContext 暂无 plugin_manager 字段，跳过初始化
+        // PipelineContext is currently empty — nothing to bind here.
+        // Plugin manager must be set via with_plugin_manager() before pipeline execution.
         Ok(())
     }
 
@@ -281,12 +274,12 @@ impl Stage for ProcessStage {
                         "Agent execution failed: {}, falling back to provider",
                         e
                     );
-                    self.run_provider(messages).await
+                    self.run_provider(messages).await?
                 }
             }
         } else {
             // 直接走 Provider 兜底
-            self.run_provider(messages).await
+            self.run_provider(messages).await?
         };
 
         // 组装回复消息链
@@ -310,90 +303,213 @@ impl Stage for ProcessStage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::message::MessageMember;
+    use crate::message::{MessageChain, MessageMember};
+    use crate::pipeline::{PipelineContext, PipelineEvent};
     use crate::platform::{MessageSource, PlatformType};
-    use crate::provider::{ChatResponse, ModelInfo, TokenUsage};
-    use crate::testing::MockProvider;
-    use chrono::Utc;
+    use crate::provider::{ChatConfig, ChatMessage, ChatResponse, ModelInfo, TokenUsage};
+    use async_trait::async_trait;
+    use std::sync::Arc;
 
-    fn make_test_event(text: &str) -> PipelineEvent {
-        let msg = AstrBotMessage {
+    /// 模拟 Provider，用于测试
+    struct MockProvider {
+        response: String,
+    }
+
+    #[async_trait]
+    impl Provider for MockProvider {
+        fn id(&self) -> &str {
+            "mock"
+        }
+
+        fn name(&self) -> &str {
+            "Mock"
+        }
+
+        async fn models(&self) -> crate::errors::Result<Vec<String>> {
+            Ok(vec!["mock-model".to_string()])
+        }
+
+        async fn chat(
+            &self,
+            _messages: Vec<ChatMessage>,
+            _config: ChatConfig,
+        ) -> crate::errors::Result<ChatResponse> {
+            Ok(ChatResponse {
+                content: self.response.clone(),
+                model: "mock-model".to_string(),
+                usage: None,
+                reasoning: None,
+                tool_calls: None,
+            })
+        }
+
+        async fn chat_stream(
+            &self,
+            _messages: Vec<ChatMessage>,
+            _config: ChatConfig,
+        ) -> crate::errors::Result<Box<dyn futures_util::Stream<Item = crate::errors::Result<ChatStreamChunk>> + Send>> {
+            let chunk = ChatStreamChunk {
+                delta: self.response.clone(),
+                finish_reason: Some("stop".to_string()),
+                model: "mock-model".to_string(),
+            };
+            let stream = futures_util::stream::iter(vec![Ok(chunk)]);
+            Ok(Box::new(stream))
+        }
+
+        async fn embedding(
+            &self,
+            _texts: Vec<String>,
+            _model: Option<String>,
+        ) -> crate::errors::Result<Vec<Vec<f32>>> {
+            Ok(vec![vec![0.0f32; 3]])
+        }
+
+        async fn model_info(&self, _model: &str) -> crate::errors::Result<ModelInfo> {
+            Ok(ModelInfo {
+                name: "mock-model".to_string(),
+                context_length: 4096,
+                supports_streaming: true,
+                supports_vision: false,
+                supports_function_calling: false,
+            })
+        }
+
+        async fn health_check(&self) -> crate::errors::Result<bool> {
+            Ok(true)
+        }
+    }
+
+    fn make_event(text: &str) -> PipelineEvent {
+        let message = crate::message::AstrBotMessage {
             message_id: "msg-1".to_string(),
-            timestamp: Utc::now(),
+            timestamp: chrono::Utc::now(),
             platform: PlatformType::Custom,
             session_id: "sess-1".to_string(),
             sender: MessageMember {
                 user_id: "user-1".to_string(),
-                nickname: Some("Test".to_string()),
+                nickname: None,
                 card: None,
                 role: None,
                 is_self: false,
             },
-            message_type: MessageType::Private,
-            chain: MessageChain::new().text(text),
+            message_type: crate::message::MessageType::Private,
+            chain: MessageChain::new().text(text.to_string()),
             raw_payload: None,
         };
-        PipelineEvent::new(msg)
+        PipelineEvent::new(message)
     }
 
     #[tokio::test]
-    async fn test_process_stage_provider_fallback() {
-        let provider = Arc::new(MockProvider::new("mock", "Mock")
-            .with_chat_response("Hello from mock!"));
+    async fn test_process_stage_with_provider() {
+        let provider = Arc::new(MockProvider {
+            response: "hello back".to_string(),
+        });
         let stage = ProcessStage::new().with_provider(provider);
+        let mut event = make_event("hi");
 
-        let mut event = make_test_event("Hi");
-        let flow = stage.process(&mut event).await.unwrap();
-
-        assert!(matches!(flow, StageFlow::Done));
-        assert!(event.result_chain.is_some());
+        let result = stage.process(&mut event).await;
+        assert!(result.is_ok());
         assert_eq!(
-            event.result_chain.unwrap().plain_text(),
-            "Hello from mock!"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_process_stage_provider_failure_fallback() {
-        let provider = Arc::new(MockProvider::new("mock", "Mock").with_chat_failure());
-        let stage = ProcessStage::new().with_provider(provider);
-
-        let mut event = make_test_event("Hi");
-        let flow = stage.process(&mut event).await.unwrap();
-
-        assert!(matches!(flow, StageFlow::Done));
-        assert!(event.result_chain.is_some());
-        let text = event.result_chain.unwrap().plain_text();
-        assert!(
-            text.contains("AI 服务暂时不可用") || text.contains("不可用"),
-            "Expected friendly error text, got: {}",
-            text
+            event.result_chain.as_ref().map(|c| c.plain_text()),
+            Some("hello back".to_string())
         );
     }
 
     #[tokio::test]
     async fn test_process_stage_empty_message() {
         let stage = ProcessStage::new();
-        let mut event = make_test_event("");
-        let flow = stage.process(&mut event).await.unwrap();
-        assert!(matches!(flow, StageFlow::Done));
+        let mut event = make_event("");
+        let result = stage.process(&mut event).await;
+        assert!(result.is_ok());
         assert!(event.result_chain.is_none());
     }
 
     #[tokio::test]
+    async fn test_process_stage_no_provider() {
+        let stage = ProcessStage::new();
+        let mut event = make_event("hello");
+        let result = stage.process(&mut event).await;
+        // Should fail because no provider configured
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
     async fn test_process_stage_history_roundtrip() {
-        let provider = Arc::new(MockProvider::new("mock", "Mock")
-            .with_chat_response("Reply"));
+        let provider = Arc::new(MockProvider {
+            response: "reply-1".to_string(),
+        });
         let stage = ProcessStage::new().with_provider(provider);
 
-        let mut event1 = make_test_event("Message 1");
-        stage.process(&mut event1).await.unwrap();
+        // First message
+        let mut event1 = make_event("msg-a");
+        let _ = stage.process(&mut event1).await.unwrap();
 
-        let mut event2 = make_test_event("Message 2");
-        stage.process(&mut event2).await.unwrap();
+        // Second message — history should contain first exchange
+        let mut event2 = make_event("msg-b");
+        let _ = stage.process(&mut event2).await.unwrap();
 
-        let history = stage.session_history.lock().await;
-        let sess = history.get("sess-1").unwrap();
-        assert!(sess.len() >= 2);
+        let history = {
+            let lock = stage.session_history.lock().await;
+            lock.get("sess-1").cloned().unwrap_or_default()
+        };
+        assert!(history.len() >= 4); // user-a + assistant-a + user-b + assistant-b
+    }
+
+    #[tokio::test]
+    async fn test_process_stage_system_prompt() {
+        let provider = Arc::new(MockProvider {
+            response: "ok".to_string(),
+        });
+        let stage = ProcessStage::new()
+            .with_provider(provider)
+            .with_system_prompt("You are a helpful assistant.");
+        let mut event = make_event("test");
+        let result = stage.process(&mut event).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_process_stage_empty_message_v2() {
+        let provider = Arc::new(MockProvider {
+            response: "empty".to_string(),
+        });
+        let stage = ProcessStage::new().with_provider(provider);
+        let mut event = make_event("");
+        let result = stage.process(&mut event).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_process_stage_long_message_v2() {
+        let provider = Arc::new(MockProvider {
+            response: "long".to_string(),
+        });
+        let stage = ProcessStage::new().with_provider(provider);
+        let mut event = make_event("this is a very long message that should still be processed correctly by the stage");
+        let result = stage.process(&mut event).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_process_stage_special_chars_v2() {
+        let provider = Arc::new(MockProvider {
+            response: "special".to_string(),
+        });
+        let stage = ProcessStage::new().with_provider(provider);
+        let mut event = make_event("你好世界 🎉 <script>alert('xss')</script>");
+        let result = stage.process(&mut event).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_process_stage_emoji_message() {
+        let provider = Arc::new(MockProvider {
+            response: "emoji".to_string(),
+        });
+        let stage = ProcessStage::new().with_provider(provider);
+        let mut event = make_event("🔥🚀💯");
+        let result = stage.process(&mut event).await;
+        assert!(result.is_ok());
     }
 }

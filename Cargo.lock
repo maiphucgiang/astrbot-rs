@@ -134,6 +134,7 @@ dependencies = [
  "astrbot-provider",
  "astrbot-security",
  "astrbot-ux",
+ "chrono",
  "clap",
  "serde_json",
  "tempfile",

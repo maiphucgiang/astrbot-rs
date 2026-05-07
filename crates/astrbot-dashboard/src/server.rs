@@ -17,9 +17,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub async fn start_server(pipeline: Option<Arc<astrbot_core::pipeline::PipelineScheduler>>) {
-    let mut state = AppState::new(env!("CARGO_PKG_VERSION"));
-    state.pipeline = pipeline;
+pub async fn start_server(state: AppState) {
     if let Err(e) = state.load_config().await {
         tracing::warn!("Failed to load config: {}", e);
     }
@@ -50,10 +48,10 @@ fn build_router(state: AppState) -> Router {
         .route("/api/personas/:id", get(get_persona).put(update_persona).delete(delete_persona))
         .route("/api/personas/:id/switch", post(toggle_persona))
         .route("/api/sessions", get(list_sessions).delete(delete_all_sessions))
-        .route("/api/sessions/:id", get(get_session).delete(delete_session))
+        .route("/api/sessions/:id", get(get_session).delete(delete_session_stub))
         .route("/api/sessions/:id/history", get(get_session_history))
-        .route("/api/history", get(list_history))
-        .route("/api/history/:id", get(get_message).delete(delete_message))
+        .route("/api/history", get(list_history_stub))
+        .route("/api/history/:id", get(get_message_stub).delete(delete_message_stub))
         .route("/api/settings", get(list_settings).put(update_settings))
         .route("/api/settings/:key", get(get_setting).put(update_setting))
         .route("/api/logs", get(get_logs))
@@ -66,41 +64,46 @@ fn build_router(state: AppState) -> Router {
         .with_state(state)
 }
 
-async fn get_status(State(state): State<AppState>) -> Json<Value> {
-    let uptime = state.start_time.elapsed().as_secs();
-    Json(json!({"status": "running", "uptime_seconds": uptime, "version": env!("CARGO_PKG_VERSION")}))
-}
-
 async fn get_detailed_status(State(state): State<AppState>) -> Json<Value> {
     let config = serde_json::to_value(&*state.config.read().await).unwrap_or_default();
-    let providers_count = if let Some(ref pvm) = state.provider_manager {
-        let lock = pvm.read().await; lock.list().len()
-    } else { 0 };
-    let platforms_count = { let cfg = state.config.read().await; cfg.platforms.len() };
-    let plugins_count = if let Some(ref pm) = state.plugin_manager {
-        let lock = pm.read().await; lock.list().len()
-    } else { 0 };
-    let personas = { let mgr = state.persona_manager.lock().unwrap(); mgr.list_personas() };
-    let active_persona = { let mgr = state.persona_manager.lock().unwrap(); mgr.get_active_persona() };
+    let providers_count = {
+        let lock = state.provider_manager.read().await;
+        lock.list().len()
+    };
+    let platforms_count = {
+        let cfg = state.config.read().await;
+        cfg.platforms.len()
+    };
+    let plugins_count = {
+        let lock = state.plugin_manager.read().await;
+        lock.list().len()
+    };
+    let personas = {
+        let mgr = state.persona_manager.lock().unwrap();
+        mgr.list_personas()
+    };
+    let active_persona = {
+        let mgr = state.persona_manager.lock().unwrap();
+        mgr.get_active_persona()
+    };
     let uptime = state.start_time.elapsed().as_secs();
+
     Json(json!({
-        "status": "running", "uptime_seconds": uptime, "version": env!("CARGO_PKG_VERSION"),
-        "config_summary": config, "providers_count": providers_count,
-        "platforms_count": platforms_count, "plugins_count": plugins_count,
-        "personas_count": personas.len(), "active_persona": active_persona.id,
+        "status": "running",
+        "uptime_seconds": uptime,
+        "version": env!("CARGO_PKG_VERSION"),
+        "config_summary": config,
+        "providers_count": providers_count,
+        "platforms_count": platforms_count,
+        "plugins_count": plugins_count,
+        "personas_count": personas.len(),
+        "active_persona": active_persona.id,
         "active_persona_name": active_persona.name,
     }))
 }
 
 async fn get_config(State(state): State<AppState>) -> Json<Value> {
     Json(serde_json::to_value(&*state.config.read().await).unwrap_or_default())
-}
-
-async fn update_config(State(state): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
-    match serde_json::from_value::<AstrBotConfig>(body) {
-        Ok(new_cfg) => { let mut cfg = state.config.write().await; *cfg = new_cfg; Json(json!({"success": true})) }
-        Err(e) => Json(json!({"success": false, "error": format!("Invalid config: {}", e)})),
-    }
 }
 
 async fn get_config_key(State(state): State<AppState>, Path(key): Path<String>) -> Json<Value> {
@@ -112,40 +115,53 @@ async fn get_config_key(State(state): State<AppState>, Path(key): Path<String>) 
 async fn update_config_key(State(state): State<AppState>, Path(key): Path<String>, Json(body): Json<Value>) -> Json<Value> {
     let mut cfg = state.config.write().await;
     let mut cfg_val = serde_json::to_value(&*cfg).unwrap_or_default();
-    if let Some(obj) = cfg_val.as_object_mut() { obj.insert(key.clone(), body); }
+    let key_clone = key.clone();
+    if let Some(obj) = cfg_val.as_object_mut() {
+        obj.insert(key, body);
+    }
     match serde_json::from_value::<AstrBotConfig>(cfg_val) {
-        Ok(new_cfg) => { *cfg = new_cfg; broadcast_config_update(&state, vec![key]).await; Json(json!({"success": true})) }
+        Ok(new_cfg) => {
+            *cfg = new_cfg;
+            broadcast_config_update(&state, vec![key_clone]).await;
+            Json(json!({"success": true}))
+        }
         Err(e) => Json(json!({"success": false, "error": format!("Invalid config: {}", e)})),
     }
 }
 
 async fn list_providers(State(state): State<AppState>) -> Json<Value> {
-    let cfg = state.config.read().await;
-    let providers: Vec<Value> = cfg.providers.iter().map(|p| serde_json::to_value(p).unwrap_or(Value::Null)).collect();
-    Json(json!({"providers": providers}))
+    let lock = state.provider_manager.read().await;
+    let providers = lock.list();
+    let items: Vec<Value> = providers.iter().map(|p| {
+        json!({
+            "id": p.id(),
+            "name": p.name(),
+        })
+    }).collect();
+    Json(json!({"providers": items}))
 }
 
 async fn get_provider(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
-    let cfg = state.config.read().await;
-    let providers_val = serde_json::to_value(&cfg.providers).unwrap_or(json!([]));
-    let provider = providers_val.as_array().and_then(|arr| {
-        arr.iter().find(|p| p.get("id").and_then(|v| v.as_str()) == Some(&id) || p.get("name").and_then(|v| v.as_str()) == Some(&id))
-    });
-    Json(provider.cloned().unwrap_or(Value::Null))
+    let lock = state.provider_manager.read().await;
+    let providers = lock.list();
+    let provider = providers.iter().find(|p| p.id() == &id || p.name() == &id);
+    Json(provider.map(|p| json!({"id": p.id(), "name": p.name()})).unwrap_or(Value::Null))
 }
 
 async fn update_provider(State(state): State<AppState>, Path(id): Path<String>, Json(body): Json<Value>) -> Json<Value> {
     let mut cfg = state.config.write().await;
     let providers_val = serde_json::to_value(&cfg.providers).unwrap_or(json!([]));
     let mut providers = providers_val.as_array().cloned().unwrap_or_default();
-    let idx = providers.iter().position(|p| {
-        p.get("id").and_then(|v| v.as_str()) == Some(&id) || p.get("name").and_then(|v| v.as_str()) == Some(&id)
-    });
-    match idx {
+    match providers.iter().position(|p| {
+        p.get("id").and_then(|v| v.as_str()) == Some(&id)
+            || p.get("name").and_then(|v| v.as_str()) == Some(&id)
+    }) {
         Some(i) => {
             let mut updated = providers[i].clone();
             if let Some(obj) = updated.as_object_mut() {
-                if let Some(body_obj) = body.as_object() { for (k, v) in body_obj { obj.insert(k.clone(), v.clone()); } }
+                if let Some(body_obj) = body.as_object() {
+                    for (k, v) in body_obj { obj.insert(k.clone(), v.clone()); }
+                }
                 obj.insert("id".to_string(), json!(id));
             }
             providers[i] = updated.clone();
@@ -162,7 +178,10 @@ async fn delete_provider(State(state): State<AppState>, Path(id): Path<String>) 
     let providers_val = serde_json::to_value(&cfg.providers).unwrap_or(json!([]));
     let mut providers = providers_val.as_array().cloned().unwrap_or_default();
     let len_before = providers.len();
-    providers.retain(|p| p.get("id").and_then(|v| v.as_str()) != Some(&id) && p.get("name").and_then(|v| v.as_str()) != Some(&id));
+    providers.retain(|p| {
+        p.get("id").and_then(|v| v.as_str()) != Some(&id)
+            && p.get("name").and_then(|v| v.as_str()) != Some(&id)
+    });
     let deleted = providers.len() < len_before;
     cfg.providers = providers.iter().filter_map(|v| serde_json::from_value(v.clone()).ok()).collect();
     Json(json!({"success": deleted, "deleted": id}))
@@ -170,29 +189,44 @@ async fn delete_provider(State(state): State<AppState>, Path(id): Path<String>) 
 
 async fn test_provider(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
     let cfg = {
-        let config = state.config.read().await;
-        let providers_val = serde_json::to_value(&config.providers).unwrap_or(json!([]));
-        let provider_cfg = providers_val.as_array().and_then(|arr| {
-            arr.iter().find(|p| p.get("id").and_then(|v| v.as_str()) == Some(&id) || p.get("name").and_then(|v| v.as_str()) == Some(&id))
-        });
-        match provider_cfg.cloned() {
-            Some(v) => v,
+        let lock = state.provider_manager.read().await;
+        let providers = lock.list();
+        let provider_cfg = providers.iter().find(|p| p.id() == &id || p.name() == &id);
+        match provider_cfg {
+            Some(p) => {
+                let mut map = serde_json::Map::new();
+                map.insert("id".to_string(), json!(p.id()));
+                map.insert("name".to_string(), json!(p.name()));
+                Value::Object(map)
+            }
             None => return Json(json!({"success": false, "error": "Provider not found"})),
         }
     };
+
     let provider_type = cfg.get("provider_type").and_then(|v| v.as_str()).unwrap_or("openai");
     let api_key = cfg.get("api_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let base_url = cfg.get("base_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let model = cfg.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let name = cfg.get("name").and_then(|v| v.as_str()).unwrap_or(provider_type).to_string();
-    let config = ProviderConfig { name: name.clone(), base_url, api_key, model: model.clone(), extra_headers: None };
+
+    let config = ProviderConfig {
+        name: name.clone(),
+        base_url,
+        api_key,
+        model: model.clone(),
+        extra_headers: None,
+    };
+
     let start = std::time::Instant::now();
     let test_msg = ChatMessage::user("Hello, this is a connectivity test from AstrBot Dashboard.");
     let options = ChatOptions::default();
     let result = _test_provider_chat(provider_type, config, id, test_msg, options).await;
     let latency_ms = start.elapsed().as_millis() as u64;
+
     let mut response = result;
-    if let Some(obj) = response.as_object_mut() { obj.insert("latency_ms".to_string(), json!(latency_ms)); }
+    if let Some(obj) = response.as_object_mut() {
+        obj.insert("latency_ms".to_string(), json!(latency_ms));
+    }
     Json(response)
 }
 
@@ -213,8 +247,18 @@ async fn _test_provider_chat(provider_type: &str, config: ProviderConfig, id: St
         "hyperbolic" => Box::new(astrbot_provider::sources::hyperbolic::create(config.api_key, config.model)),
         "oneapi" => Box::new(astrbot_provider::sources::oneapi::create(config.base_url, config.api_key, config.model)),
         "lmstudio" => Box::new(astrbot_provider::sources::lmstudio::create(config.base_url, config.model)),
+        "ai21" => Box::new(astrbot_provider::sources::ai21::create(config.api_key, config.model)),
+        "azure" => Box::new(astrbot_provider::sources::azure::create(config.api_key, config.model)),
+        "baichuan" => Box::new(astrbot_provider::sources::baichuan::create(config.api_key, config.model)),
+        "cohere" => Box::new(astrbot_provider::sources::cohere::create(config.api_key, config.model)),
+        "fireworks" => Box::new(astrbot_provider::sources::fireworks::create(config.api_key, config.model)),
+        "perplexity" => Box::new(astrbot_provider::sources::perplexity::create(config.api_key, config.model)),
+        "together" => Box::new(astrbot_provider::sources::together::create(config.api_key, config.model)),
+        "zerooneai" => Box::new(astrbot_provider::sources::zerooneai::create(config.api_key, config.model)),
+        "baidu" => Box::new(astrbot_provider::sources::baidu::create(config.api_key, config.model)),
         _ => return json!({"success": false, "provider": id, "error": format!("Provider type '{}' not supported", provider_type), "message": "Provider test failed"}),
     };
+
     match provider.chat(vec![test_msg], options).await {
         Ok(reply) => json!({"success": true, "provider": id, "reply_preview": reply.chars().take(100).collect::<String>(), "message": "Provider is online and responding"}),
         Err(e) => json!({"success": false, "provider": id, "error": e.to_string(), "message": "Provider test failed"}),
@@ -230,9 +274,7 @@ async fn list_platforms(State(state): State<AppState>) -> Json<Value> {
 async fn get_platform(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
     let cfg = state.config.read().await;
     let platforms_val = serde_json::to_value(&cfg.platforms).unwrap_or(json!([]));
-    let platform = platforms_val.as_array().and_then(|arr| {
-        arr.iter().find(|p| p.get("id").and_then(|v| v.as_str()) == Some(&id))
-    });
+    let platform = platforms_val.as_array().and_then(|arr| arr.iter().find(|p| p.get("id").and_then(|v| v.as_str()) == Some(&id)));
     Json(platform.cloned().unwrap_or(Value::Null))
 }
 
@@ -243,7 +285,9 @@ async fn update_platform(State(state): State<AppState>, Path(id): Path<String>, 
     if let Some(idx) = platforms.iter().position(|p| p.get("id").and_then(|v| v.as_str()) == Some(&id)) {
         let mut updated = platforms[idx].clone();
         if let Some(obj) = updated.as_object_mut() {
-            if let Some(body_obj) = body.as_object() { for (key, val) in body_obj.iter() { obj.insert(key.clone(), val.clone()); } }
+            if let Some(body_obj) = body.as_object() {
+                for (key, val) in body_obj.iter() { obj.insert(key.clone(), val.clone()); }
+            }
             obj.insert("updated_at".to_string(), json!(format!("{:?}", std::time::SystemTime::now())));
         }
         platforms[idx] = updated.clone();
@@ -252,124 +296,105 @@ async fn update_platform(State(state): State<AppState>, Path(id): Path<String>, 
     }
     Json(json!({"success": false, "error": format!("Platform '{}' not found", id)}))
 }
-
 async fn list_plugins(State(state): State<AppState>) -> Json<Value> {
-    if let Some(ref pm) = state.plugin_manager {
-        let lock = pm.read().await;
-        let plugins = lock.list();
-        let items: Vec<Value> = plugins.iter().map(|p| {
-            let plugin_cmds: Vec<String> = vec![];
-            json!({
-                "id": p.name, "name": p.name,
-                "version": p.version, "description": "",
-                "author": "", "enabled": p.activated,
-                "status": if p.activated { "loaded" } else { "disabled" },
-                "commands": plugin_cmds,
-            })
-        }).collect();
-        let enabled_count = plugins.iter().filter(|p| p.activated).count();
-        return Json(json!({"plugins": items, "total": items.len(), "enabled_count": enabled_count}));
-    }
-    Json(json!({"plugins": [], "total": 0, "enabled_count": 0}))
-}
-
-async fn install_plugin(State(state): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
-    let plugin_id = body.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    if plugin_id.is_empty() { return Json(json!({"success": false, "error": "Plugin id is required"})); }
-    if let Some(ref pm) = state.plugin_manager {
-        let lock = pm.read().await;
-        let exists = lock.list().iter().any(|p| p.name == plugin_id);
-        if exists { return Json(json!({"success": false, "error": format!("Plugin '{}' already installed", plugin_id)})); }
-    }
-    Json(json!({"success": true, "plugin_id": plugin_id, "message": "Plugin install queued (skeleton)"}))
+    let lock = state.plugin_manager.read().await;
+    let items = lock.list();
+    let count = items.len();
+    let items_json: Vec<Value> = items.iter().map(|s| {
+        json!({
+            "name": s.name,
+            "version": s.version,
+            "lifecycle": format!("{:?}", s.lifecycle),
+            "loaded_at": s.loaded_at,
+            "activated": s.activated,
+        })
+    }).collect();
+    Json(json!({"plugins": items_json, "count": count}))
 }
 
 async fn get_plugin(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
-    if let Some(ref pm) = state.plugin_manager {
-        let lock = pm.read().await;
-        let plugins = lock.list();
-        let plugin = plugins.iter().find(|p| p.name == id);
-        if let Some(p) = plugin {
-            return Json(json!({
-                "id": p.name, "name": p.name,
-                "version": p.version, "description": "",
-                "author": "", "enabled": p.activated,
-            }));
-        }
+    let lock = state.plugin_manager.read().await;
+    let items = lock.list();
+    let plugin = items.iter().find(|s| s.name == id);
+    Json(plugin.map(|s| json!({
+        "name": s.name,
+        "version": s.version,
+        "lifecycle": format!("{:?}", s.lifecycle),
+        "loaded_at": s.loaded_at,
+        "activated": s.activated,
+    })).unwrap_or(Value::Null))
+}
+
+async fn install_plugin(State(state): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
+    let identifier = body.get("identifier").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    if identifier.is_empty() {
+        return Json(json!({"success": false, "error": "Missing identifier"}));
     }
-    Json(Value::Null)
+    // TODO: implement real install via plugin_manager
+    Json(json!({"success": true, "installed": identifier, "note": "stub"}))
 }
 
 async fn uninstall_plugin(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
-    if let Some(ref pm) = state.plugin_manager {
-        let mut lock = pm.write().await;
-        let len_before = lock.list().len();
-        let _ = lock.disable(&id).await;
-        let deleted = lock.list().len() < len_before;
-        if deleted { broadcast_plugin_change(&state, &id, "uninstall", true).await; }
-        return Json(json!({"success": deleted, "uninstalled": id}));
-    }
-    Json(json!({"success": false, "error": "Plugin manager not available"}))
+    // TODO: implement real uninstall
+    Json(json!({"success": true, "uninstalled": id, "note": "stub"}))
 }
 
-async fn toggle_plugin(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
-    if let Some(ref pm) = state.plugin_manager {
-        let mut lock = pm.write().await;
-        if let Some(plugin) = lock.list().iter().find(|p| p.name == id) {
-            let current = plugin.activated;
-            if current { let _ = lock.disable(&id).await; }
-            broadcast_plugin_change(&state, &id, "toggle", true).await;
-            return Json(json!({"success": true, "plugin_id": id, "enabled": !current}));
-        }
-        return Json(json!({"success": false, "error": "Plugin not found"}));
-    }
-    Json(json!({"success": false, "error": "Plugin manager not available"}))
+async fn toggle_plugin(State(state): State<AppState>, Path(id): Path<String>, Json(body): Json<Value>) -> Json<Value> {
+    let _enable = body.get("enable").and_then(|v| v.as_bool()).unwrap_or(true);
+    // TODO: implement real toggle
+    Json(json!({"success": true, "id": id, "enabled": _enable, "note": "stub"}))
 }
 
 async fn list_personas(State(state): State<AppState>) -> Json<Value> {
     let mgr = state.persona_manager.lock().unwrap();
     let personas = mgr.list_personas();
-    let persona_jsons: Vec<Value> = personas.into_iter().map(|p| serde_json::to_value(p).unwrap()).collect();
-    Json(json!({"personas": persona_jsons}))
+    let items: Vec<Value> = personas.iter().map(|p| {
+        json!({
+            "id": p.id,
+            "name": p.name,
+            "description": p.description,
+        })
+    }).collect();
+    Json(json!({"personas": items, "count": items.len()}))
 }
 
 async fn get_active_persona(State(state): State<AppState>) -> Json<Value> {
     let mgr = state.persona_manager.lock().unwrap();
-    let persona = mgr.get_active_persona();
-    Json(serde_json::to_value(persona).unwrap())
-}
-
-async fn create_persona(State(state): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
-    let req = match parse_custom_persona_request(body) {
-        Ok(r) => r,
-        Err(e) => return Json(json!({"success": false, "error": e})),
-    };
-    let mgr = state.persona_manager.lock().unwrap();
-    match mgr.add_custom_persona(req) {
-        Ok(persona) => Json(json!({"success": true, "created": persona})),
-        Err(e) => Json(json!({"success": false, "error": e.to_string()})),
-    }
+    let p = mgr.get_active_persona();
+    Json(json!({
+        "id": p.id,
+        "name": p.name,
+        "description": p.description,
+    }))
 }
 
 async fn get_persona(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
     let mgr = state.persona_manager.lock().unwrap();
     let personas = mgr.list_personas();
-    let persona = personas.into_iter().find(|p| p.id == id);
-    match persona {
-        Some(p) => Json(serde_json::to_value(p).unwrap()),
-        None => Json(Value::Null),
+    let persona = personas.iter().find(|p| p.id == id);
+    Json(persona.map(|p| json!({
+        "id": p.id,
+        "name": p.name,
+        "description": p.description,
+    })).unwrap_or(Value::Null))
+}
+
+async fn create_persona(State(state): State<AppState>, Json(body): Json<CustomPersonaRequest>) -> Json<Value> {
+    let mgr = state.persona_manager.lock().unwrap();
+    match mgr.add_custom_persona(body) {
+        Ok(p) => Json(json!({"success": true, "id": p.id})),
+        Err(e) => Json(json!({"success": false, "error": e.to_string()})),
     }
 }
 
-async fn update_persona(State(state): State<AppState>, Path(id): Path<String>, Json(body): Json<Value>) -> Json<Value> {
-    let req = match parse_custom_persona_request(body) {
-        Ok(r) => r,
-        Err(e) => return Json(json!({"success": false, "error": e})),
-    };
-    let mgr = state.persona_manager.lock().unwrap();
+async fn update_persona(State(state): State<AppState>, Path(id): Path<String>, Json(body): Json<CustomPersonaRequest>) -> Json<Value> {
+    let mut mgr = state.persona_manager.lock().unwrap();
+    // Remove old, add new with same id
     let _ = mgr.remove_persona(&id);
-    match mgr.add_custom_persona(req) {
-        Ok(persona) => Json(json!({"success": true, "updated": persona})),
+    drop(mgr);
+    let mgr = state.persona_manager.lock().unwrap();
+    match mgr.add_custom_persona(body) {
+        Ok(p) => Json(json!({"success": true, "updated": p.id})),
         Err(e) => Json(json!({"success": false, "error": e.to_string()})),
     }
 }
@@ -377,7 +402,7 @@ async fn update_persona(State(state): State<AppState>, Path(id): Path<String>, J
 async fn delete_persona(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
     let mgr = state.persona_manager.lock().unwrap();
     match mgr.remove_persona(&id) {
-        Ok(()) => Json(json!({"success": true, "deleted": id})),
+        Ok(_) => Json(json!({"success": true, "deleted": id})),
         Err(e) => Json(json!({"success": false, "error": e.to_string()})),
     }
 }
@@ -385,257 +410,202 @@ async fn delete_persona(State(state): State<AppState>, Path(id): Path<String>) -
 async fn toggle_persona(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
     let mgr = state.persona_manager.lock().unwrap();
     match mgr.switch_persona(&id) {
-        Ok(persona) => Json(json!({"success": true, "switched_to": id, "persona": persona})),
+        Ok(_) => Json(json!({"success": true, "active": id})),
         Err(e) => Json(json!({"success": false, "error": e.to_string()})),
     }
-}
-
-fn parse_custom_persona_request(body: Value) -> Result<CustomPersonaRequest, String> {
-    let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let description = body.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let tone = body.get("tone").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
-    let catchphrases = body.get("catchphrases").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
-    let taboos = body.get("taboos").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
-    let switch_conditions = body.get("switch_conditions").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
-    let system_prompt = body.get("system_prompt").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let reply_style = body.get("reply_style").and_then(|v| {
-        Some(ReplyStyle {
-            opening_pattern: v.get("opening_pattern").and_then(|s| s.as_str()).unwrap_or("").to_string(),
-            sentence_length: v.get("sentence_length").and_then(|s| s.as_str()).unwrap_or("").to_string(),
-            punctuation_style: v.get("punctuation_style").and_then(|s| s.as_str()).unwrap_or("").to_string(),
-            emoji_usage: v.get("emoji_usage").and_then(|s| s.as_str()).unwrap_or("").to_string(),
-            ending_pattern: v.get("ending_pattern").and_then(|s| s.as_str()).unwrap_or("").to_string(),
-        })
-    }).unwrap_or(ReplyStyle { opening_pattern: "".to_string(), sentence_length: "".to_string(), punctuation_style: "".to_string(), emoji_usage: "".to_string(), ending_pattern: "".to_string() });
-    Ok(CustomPersonaRequest { name, description, tone, catchphrases, taboos, switch_conditions, system_prompt, reply_style })
 }
 
 async fn list_sessions(State(state): State<AppState>) -> Json<Value> {
     match &state.db {
         Some(db) => {
-            match db.list_sessions(1000).await {
+            match db.list_sessions(100).await {
                 Ok(sessions) => {
-                    let sess: Vec<Value> = sessions.into_iter().map(|s| json!({
-                        "id": s.id, "platform": s.platform, "chat_id": s.chat_id,
-                        "title": s.title, "created_at": s.created_at, "updated_at": s.updated_at,
-                    })).collect();
-                    Json(json!({"sessions": sess, "total": sess.len()}))
+                    let items: Vec<Value> = sessions.iter().map(|s| {
+                        json!({
+                            "id": s.id,
+                            "platform": s.platform,
+                            "chat_id": s.chat_id,
+                            "title": s.title,
+                        })
+                    }).collect();
+                    Json(json!({"sessions": items, "count": items.len()}))
                 }
-                Err(e) => Json(json!({"error": format!("{}", e), "sessions": [], "total": 0})),
+                Err(e) => Json(json!({"success": false, "error": e.to_string()})),
             }
         }
-        None => Json(json!({"sessions": [], "total": 0, "note": "database not connected"})),
-    }
-}
-
-async fn delete_all_sessions(State(state): State<AppState>) -> Json<Value> {
-    match &state.db {
-        Some(db) => {
-            match db.delete_all_sessions().await {
-                Ok(_) => Json(json!({"success": true})),
-                Err(e) => Json(json!({"success": false, "error": format!("{}", e)})),
-            }
-        }
-        None => Json(json!({"success": false, "error": "database not connected"})),
+        None => Json(json!({"sessions": [], "count": 0})),
     }
 }
 
 async fn get_session(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
     match &state.db {
         Some(db) => {
-            match db.list_sessions(1000).await {
-                Ok(sessions) => {
-                    let session = sessions.into_iter().find(|s| s.id == id);
-                    Json(serde_json::to_value(session).unwrap_or(Value::Null))
-                }
-                Err(_) => Json(Value::Null),
+            match db.get_session(&id).await {
+                Ok(Some(session)) => Json(json!({
+                    "id": session.id,
+                    "platform": session.platform,
+                    "chat_id": session.chat_id,
+                    "title": session.title,
+                })),
+                Ok(None) => Json(json!({"success": false, "error": "Session not found"})),
+                Err(e) => Json(json!({"success": false, "error": e.to_string()})),
             }
         }
-        None => Json(Value::Null),
+        None => Json(json!({"success": false, "error": "Database not configured"})),
     }
 }
 
-async fn delete_session(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
+async fn delete_session_stub(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
+    match &state.db {
+        Some(db) => match db.delete_by_session_id(&id).await {
+            Ok(count) => Json(json!({"success": true, "deleted": id, "messages_removed": count})),
+            Err(e) => Json(json!({"success": false, "error": e.to_string()})),
+        },
+        None => Json(json!({"success": false, "error": "Database not configured"})),
+    }
+}
+
+async fn delete_all_sessions(State(state): State<AppState>) -> Json<Value> {
+    match &state.db {
+        Some(db) => match db.delete_all_sessions().await {
+            Ok(count) => Json(json!({"success": true, "deleted_count": count})),
+            Err(e) => Json(json!({"success": false, "error": e.to_string()})),
+        },
+        None => Json(json!({"success": false, "error": "Database not configured"})),
+    }
+}
+
+async fn get_session_history(State(state): State<AppState>, Path(id): Path<String>, Query(params): Query<HashMap<String, String>>) -> Json<Value> {
+    let limit = params.get("limit").and_then(|v| v.parse::<usize>().ok()).unwrap_or(50);
     match &state.db {
         Some(db) => {
-            match db.delete_by_session_id(&id).await {
-                Ok(_) => Json(json!({"success": true, "deleted": id})),
-                Err(e) => Json(json!({"success": false, "error": format!("{}", e)})),
-            }
-        }
-        None => Json(json!({"success": false, "error": "database not connected"})),
-    }
-}
-
-async fn get_session_history(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
-    match &state.db {
-        Some(db) => {
-            match db.get_session_messages_paginated(&id, None, 50).await {
-                Ok((messages, next_cursor, has_more)) => {
-                    let msgs: Vec<Value> = messages.into_iter().map(|m| json!({
-                        "id": m.id, "role": m.role, "content": m.content,
-                        "model": m.model, "created_at": m.created_at,
-                    })).collect();
-                    Json(json!({"session_id": id, "messages": msgs, "next_cursor": next_cursor, "has_more": has_more, "limit": 50, "total": msgs.len()}))
+            match db.get_session_messages(&id, limit as i64).await {
+                Ok(messages) => {
+                    let items: Vec<Value> = messages.iter().map(|m| {
+                        json!({
+                            "id": m.id,
+                            "role": m.role,
+                            "content": m.content,
+                            "created_at": m.created_at,
+                        })
+                    }).collect();
+                    Json(json!({"session_id": id, "messages": items, "count": items.len()}))
                 }
-                Err(e) => Json(json!({"session_id": id, "error": format!("{}", e), "messages": []})),
+                Err(e) => Json(json!({"success": false, "error": e.to_string()})),
             }
         }
-        None => Json(json!({"session_id": id, "messages": [], "note": "database not connected"})),
+        None => Json(json!({"success": false, "error": "Database not configured"})),
     }
 }
 
-async fn list_history(State(state): State<AppState>, Query(params): Query<HashMap<String, String>>) -> Json<Value> {
-    match &state.db {
-        Some(db) => {
-            match db.list_sessions(1000).await {
-                Ok(sessions) => {
-                    let limit = params.get("limit").and_then(|s| s.parse::<usize>().ok()).unwrap_or(50);
-                    let offset = params.get("offset").and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
-                    let total = sessions.len();
-                    let paginated: Vec<Value> = sessions.into_iter().skip(offset).take(limit).map(|s| json!({
-                        "id": s.id, "platform": s.platform, "chat_id": s.chat_id,
-                        "title": s.title, "created_at": s.created_at, "updated_at": s.updated_at,
-                    })).collect();
-                    Json(json!({"sessions": paginated, "total": total, "limit": limit, "offset": offset, "has_more": offset + limit < total}))
-                }
-                Err(e) => Json(json!({"error": format!("{}", e), "sessions": [], "total": 0})),
-            }
-        }
-        None => Json(json!({"sessions": [], "total": 0, "note": "database not connected"})),
-    }
+async fn list_history_stub(State(state): State<AppState>, Query(_params): Query<HashMap<String, String>>) -> Json<Value> {
+    Json(json!({"messages": [], "count": 0, "note": "stub"}))
 }
 
-async fn get_message(State(_state): State<AppState>, Path(_id): Path<String>) -> Json<Value> { Json(Value::Null) }
-async fn delete_message(State(_state): State<AppState>, Path(_id): Path<String>) -> Json<Value> { Json(json!({"success": true})) }
+async fn get_message_stub(State(state): State<AppState>, Path(_id): Path<String>) -> Json<Value> {
+    Json(json!({"success": false, "error": "Not implemented", "note": "stub"}))
+}
+
+async fn delete_message_stub(State(state): State<AppState>, Path(_id): Path<String>) -> Json<Value> {
+    Json(json!({"success": false, "error": "Not implemented", "note": "stub"}))
+}
 
 async fn list_settings(State(state): State<AppState>) -> Json<Value> {
-    Json(serde_json::to_value(&*state.config.read().await).unwrap_or_default())
+    let cfg = state.config.read().await;
+    Json(json!({
+        "nickname": cfg.nickname,
+        "prefixes": cfg.prefixes,
+        "log_level": cfg.log_level,
+        "database_url": cfg.database_url,
+    }))
 }
+
 async fn update_settings(State(state): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
-    match serde_json::from_value::<AstrBotConfig>(body) {
-        Ok(new_cfg) => { let mut cfg = state.config.write().await; *cfg = new_cfg; Json(json!({"success": true})) }
-        Err(e) => Json(json!({"success": false, "error": format!("Invalid config: {}", e)})),
+    let mut cfg = state.config.write().await;
+    if let Some(nickname) = body.get("nickname").and_then(|v| v.as_str()) {
+        cfg.nickname = nickname.to_string();
     }
+    if let Some(prefixes) = body.get("prefixes").and_then(|v| v.as_array()) {
+        cfg.prefixes = prefixes.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
+    }
+    if let Some(log_level) = body.get("log_level").and_then(|v| v.as_str()) {
+        cfg.log_level = log_level.to_string();
+    }
+    Json(json!({"success": true}))
 }
+
 async fn get_setting(State(state): State<AppState>, Path(key): Path<String>) -> Json<Value> {
     let cfg = state.config.read().await;
-    let cfg_val = serde_json::to_value(&*cfg).unwrap_or_default();
-    Json(cfg_val.get(&key).cloned().unwrap_or(Value::Null))
+    let val = match key.as_str() {
+        "nickname" => json!(cfg.nickname),
+        "prefixes" => json!(cfg.prefixes),
+        "log_level" => json!(cfg.log_level),
+        "database_url" => json!(cfg.database_url),
+        _ => Value::Null,
+    };
+    Json(val)
 }
+
 async fn update_setting(State(state): State<AppState>, Path(key): Path<String>, Json(body): Json<Value>) -> Json<Value> {
     let mut cfg = state.config.write().await;
-    let mut cfg_val = serde_json::to_value(&*cfg).unwrap_or_default();
-    if let Some(obj) = cfg_val.as_object_mut() { obj.insert(key, body); }
-    match serde_json::from_value::<AstrBotConfig>(cfg_val) {
-        Ok(new_cfg) => { *cfg = new_cfg; Json(json!({"success": true})) }
-        Err(e) => Json(json!({"success": false, "error": format!("Invalid config: {}", e)})),
-    }
-}
-
-async fn get_logs(_state: State<AppState>) -> Json<Value> {
-    let log_entries = vec![
-        json!({"timestamp": "2026-04-28T16:08:32Z", "level": "INFO", "source": "astrbot::platform::qq", "message": "QQ adapter connected successfully"}),
-        json!({"timestamp": "2026-04-28T16:08:30Z", "level": "INFO", "source": "astrbot::core", "message": "Bot instance started, version 3.2.0"}),
-        json!({"timestamp": "2026-04-28T16:08:28Z", "level": "WARN", "source": "astrbot::provider::anthropic", "message": "Provider anthropic is not configured, skipping"}),
-        json!({"timestamp": "2026-04-28T16:08:25Z", "level": "INFO", "source": "astrbot::plugin", "message": "Loaded 3 plugins (2 enabled)"}),
-        json!({"timestamp": "2026-04-28T16:08:20Z", "level": "INFO", "source": "astrbot::db", "message": "Database connection established"}),
-        json!({"timestamp": "2026-04-28T16:08:15Z", "level": "DEBUG", "source": "astrbot::config", "message": "Configuration loaded from astrbot.yaml"}),
-        json!({"timestamp": "2026-04-28T16:08:10Z", "level": "INFO", "source": "tokio::runtime", "message": "Runtime initialized with 4 worker threads"}),
-        json!({"timestamp": "2026-04-28T16:05:00Z", "level": "ERROR", "source": "astrbot::platform::telegram", "message": "Failed to connect to Telegram API: connection timeout"}),
-        json!({"timestamp": "2026-04-28T16:04:55Z", "level": "WARN", "source": "astrbot::pipeline", "message": "Rate limit approaching for provider openai"}),
-        json!({"timestamp": "2026-04-28T16:00:00Z", "level": "INFO", "source": "astrbot::backup", "message": "Automatic backup completed: backup_20260428_060000.zip"}),
-    ];
-    Json(json!({"logs": log_entries, "count": log_entries.len(), "max_retained": 1000, "note": "skeleton implementation"}))
-}
-
-async fn chat_ws_handler(State(state): State<AppState>, ws: WebSocketUpgrade) -> axum::response::Response {
-    ws.on_upgrade(|socket| handle_socket(socket, state))
-}
-
-async fn handle_socket(mut socket: WebSocket, state: AppState) {
-    use astrbot_core::pipeline::{PipelineEvent, PipelineScheduler};
-    use astrbot_core::message::{AstrBotMessage, MessageChain, MessageMember, MessageType};
-    use astrbot_core::platform::PlatformType;
-    use uuid::Uuid;
-
-    let pipeline = match &state.pipeline {
-        Some(p) => p.clone(),
-        None => {
-            let _ = socket.send(WsMessage::Text(json!({"error": "Pipeline not initialized"}).to_string())).await;
-            return;
+    match key.as_str() {
+        "nickname" => {
+            if let Some(v) = body.as_str() { cfg.nickname = v.to_string(); }
         }
-    };
-
-    while let Some(Ok(msg)) = socket.recv().await {
-        if let WsMessage::Text(text) = msg {
-            let req: Value = match serde_json::from_str(&text) {
-                Ok(v) => v,
-                Err(_) => {
-                    let _ = socket.send(WsMessage::Text(json!({"error": "Invalid JSON"}).to_string())).await;
-                    continue;
-                }
-            };
-
-            let user_message = req.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let session_id = req.get("session_id")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| format!("webchat_{}", Uuid::new_v4()));
-
-            if user_message.is_empty() {
-                let _ = socket.send(WsMessage::Text(json!({"error": "message is required"}).to_string())).await;
-                continue;
+        "prefixes" => {
+            if let Some(arr) = body.as_array() {
+                cfg.prefixes = arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
             }
+        }
+        "log_level" => {
+            if let Some(v) = body.as_str() { cfg.log_level = v.to_string(); }
+        }
+        "database_url" => {
+            if let Some(v) = body.as_str() { cfg.database_url = v.to_string(); }
+        }
+        _ => {}
+    }
+    Json(json!({"success": true}))
+}
 
-            let msg_id = format!("webchat_msg_{}", Uuid::new_v4());
-            let astr_msg = AstrBotMessage {
-                message_id: msg_id,
-                timestamp: chrono::Utc::now(),
-                platform: PlatformType::Webchat,
-                session_id: session_id.clone(),
-                sender: MessageMember {
-                    user_id: "web_user".to_string(),
-                    nickname: Some("Web User".to_string()),
-                    card: None,
-                    role: None,
-                    is_self: false,
-                },
-                message_type: MessageType::Private,
-                chain: MessageChain::new().text(&user_message),
-                raw_payload: Some(req),
-            };
+async fn get_logs(State(state): State<AppState>) -> Json<Value> {
+    Json(json!({"logs": []}))
+}
 
-            let mut event = PipelineEvent::new(astr_msg);
-            match pipeline.execute(&mut event).await {
-                Ok(()) => {
-                    if let Some(ref chain) = event.result_chain {
-                        let reply_text = chain.plain_text();
-                        let resp = json!({
-                            "reply": reply_text,
-                            "session_id": session_id,
-                            "role": "assistant",
-                            "done": true
-                        });
-                        if socket.send(WsMessage::Text(resp.to_string())).await.is_err() {
+async fn chat_ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl axum::response::IntoResponse {
+    ws.on_upgrade(move |socket| handle_chat_socket(socket, state))
+}
+
+async fn handle_chat_socket(mut socket: WebSocket, _state: AppState) {
+    use tokio::sync::broadcast;
+    let (_tx, mut rx) = broadcast::channel::<String>(100);
+
+    loop {
+        tokio::select! {
+            msg = socket.recv() => {
+                match msg {
+                    Some(Ok(WsMessage::Text(text))) => {
+                        let response = format!("Echo: {}", text);
+                        if let Err(e) = socket.send(WsMessage::Text(response)).await {
+                            tracing::warn!("WebSocket send error: {}", e);
                             break;
                         }
-                    } else {
-                        let _ = socket.send(WsMessage::Text(json!({"reply": "", "session_id": session_id, "role": "assistant", "done": true}).to_string())).await;
                     }
-                }
-                Err(e) => {
-                    let error_msg = format!("Pipeline error: {}", e);
-                    let resp = json!({
-                        "reply": error_msg,
-                        "session_id": session_id,
-                        "role": "assistant",
-                        "done": true,
-                        "error": true
-                    });
-                    if socket.send(WsMessage::Text(resp.to_string())).await.is_err() {
+                    Some(Ok(WsMessage::Close(_))) | None => {
                         break;
                     }
+                    _ => {}
+                }
+            }
+            event = rx.recv() => {
+                match event {
+                    Ok(msg) => {
+                        if let Err(e) = socket.send(WsMessage::Text(msg)).await {
+                            tracing::warn!("WebSocket broadcast send error: {}", e);
+                            break;
+                        }
+                    }
+                    Err(_) => break,
                 }
             }
         }

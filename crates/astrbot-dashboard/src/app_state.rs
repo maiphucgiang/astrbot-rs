@@ -15,9 +15,9 @@ pub struct AppState {
     pub config_path: String,
     pub persona_manager: Arc<std::sync::Mutex<PersonaManager>>,
     pub sse_broadcaster: Option<Arc<SseBroadcaster>>,
-    pub plugin_manager: Option<Arc<RwLock<PluginManager>>>,
-    pub provider_manager: Option<Arc<RwLock<ProviderManager>>>,
-    pub pipeline: Option<Arc<astrbot_core::pipeline::PipelineScheduler>>,
+    pub plugin_manager: Arc<RwLock<PluginManager>>,
+    pub provider_manager: Arc<RwLock<ProviderManager>>,
+    pub pipeline: Option<Arc<dyn std::any::Any + Send + Sync>>,
     pub db: Option<Arc<astrbot_core::db::Database>>,
     pub jwt_secret: Option<String>,
     pub admin_password: Option<String>,
@@ -33,17 +33,20 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(version: impl Into<String>) -> Self {
+    pub fn new(
+        plugin_manager: Arc<RwLock<PluginManager>>,
+        provider_manager: Arc<RwLock<ProviderManager>>,
+    ) -> Self {
         let persona_mgr = PersonaManager::new(Some("data/personas.db".to_string()));
         Self {
-            version: version.into(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
             start_time: std::time::Instant::now(),
             config: Arc::new(RwLock::new(AstrBotConfig::default())),
             config_path: "data/config.json".to_string(),
             persona_manager: Arc::new(std::sync::Mutex::new(persona_mgr)),
             sse_broadcaster: Some(Arc::new(SseBroadcaster::default())),
-            plugin_manager: None,
-            provider_manager: None,
+            plugin_manager,
+            provider_manager,
             pipeline: None,
             db: None,
             jwt_secret: None,
@@ -81,17 +84,7 @@ impl AppState {
         self
     }
 
-    pub fn with_plugin_manager(mut self, pm: Arc<RwLock<PluginManager>>) -> Self {
-        self.plugin_manager = Some(pm);
-        self
-    }
-
-    pub fn with_provider_manager(mut self, pm: Arc<RwLock<ProviderManager>>) -> Self {
-        self.provider_manager = Some(pm);
-        self
-    }
-
-    pub fn with_pipeline(mut self, p: Arc<astrbot_core::pipeline::PipelineScheduler>) -> Self {
+    pub fn with_pipeline(mut self, p: Arc<dyn std::any::Any + Send + Sync>) -> Self {
         self.pipeline = Some(p);
         self
     }
