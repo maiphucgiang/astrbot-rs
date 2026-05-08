@@ -4,6 +4,8 @@ use clap::{Parser, Subcommand};
 use std::path::Path;
 use std::sync::Arc;
 use tracing::{error, info, warn};
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::prelude::*;
 
 #[derive(Parser)]
 #[command(name = "astrbot")]
@@ -76,22 +78,31 @@ enum PluginAction {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
+    // Create shared log buffer for dashboard log streaming
+    let log_buffer = Arc::new(astrbot_dashboard::log_buffer::LogBuffer::new(1000));
+    let capture_layer = astrbot_dashboard::log_buffer::LogCaptureLayer::new(log_buffer.clone());
+
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stdout)
+        )
+        .with(
             tracing_subscriber::EnvFilter::from_default_env()
                 .add_directive("astrbot=info".parse()?)
-                .add_directive("warn".parse()?),
+                .add_directive("warn".parse()?)
         )
+        .with(capture_layer)
         .init();
     let cli = Cli::parse();
     match cli.command {
         Commands::Init { dir, minimal } => cmd_init(&dir, minimal).await?,
-        Commands::Run { config, daemon } => cmd_run(config, daemon).await?,
+        Commands::Run { config, daemon } => cmd_run(config, daemon, log_buffer).await?,
         Commands::Config { show, set, file } => cmd_config(show, set, &file).await?,
         Commands::Status { detailed, config } => cmd_status(detailed, &config).await?,
         Commands::Plugin { action } => cmd_plugin(action).await?,
         Commands::Validate { config } => cmd_validate(&config).await?,
-        Commands::Dashboard { port, config } => cmd_dashboard(port, &config).await?,
+        Commands::Dashboard { port, config } => cmd_dashboard(port, &config, log_buffer).await?,
         Commands::Test { provider, api_key } => cmd_test(&provider, api_key.as_deref()).await?,
     }
     Ok(())
@@ -141,7 +152,7 @@ fn minimal_config() -> serde_json::Value {
     })
 }
 
-async fn cmd_run(config_path: String, daemon: bool) -> anyhow::Result<()> {
+async fn cmd_run(config_path: String, daemon: bool, log_buffer: Arc<astrbot_dashboard::log_buffer::LogBuffer>) -> anyhow::Result<()> {
     info!("Starting AstrBot server...");
     info!("Config file: {}", config_path);
     if daemon {
@@ -172,10 +183,12 @@ async fn cmd_run(config_path: String, daemon: bool) -> anyhow::Result<()> {
         info!("Platform configured: {} (type={})", platform_cfg.id, platform_cfg.platform_type);
     }
     // Start dashboard in background
+    let log_buffer_dashboard = log_buffer.clone();
     tokio::spawn(async move {
         let pm = Arc::new(tokio::sync::RwLock::new(astrbot_plugin::PluginManager::new(std::path::PathBuf::from("plugins"))));
         let pvm = Arc::new(tokio::sync::RwLock::new(astrbot_provider::client::ProviderManager::new()));
-        let state = astrbot_dashboard::app_state::AppState::new(pm, pvm);
+        let state = astrbot_dashboard::app_state::AppState::new(pm, pvm)
+            .with_log_buffer(log_buffer_dashboard);
         astrbot_dashboard::server::start_server(state).await;
     });
     // Start bot runtime (blocks until ctrl-c)
@@ -295,12 +308,13 @@ async fn cmd_validate(config_path: &str) -> anyhow::Result<()> {
     }
 }
 
-async fn cmd_dashboard(port: u16, _config: &str) -> anyhow::Result<()> {
+async fn cmd_dashboard(port: u16, _config: &str, log_buffer: Arc<astrbot_dashboard::log_buffer::LogBuffer>) -> anyhow::Result<()> {
     info!("Starting dashboard on port {}", port);
-    println!("🚀 Dashboard starting on http://0.0.0.0:{}", port);
+    println!("Dashboard starting on http://0.0.0.0:{}", port);
     let plugin_manager = Arc::new(tokio::sync::RwLock::new(astrbot_plugin::PluginManager::new(std::path::PathBuf::from("plugins"))));
     let provider_manager = Arc::new(tokio::sync::RwLock::new(astrbot_provider::client::ProviderManager::new()));
-    let state = astrbot_dashboard::app_state::AppState::new(plugin_manager, provider_manager);
+    let state = astrbot_dashboard::app_state::AppState::new(plugin_manager, provider_manager)
+        .with_log_buffer(log_buffer);
     astrbot_dashboard::server::start_server(state).await;
     Ok(())
 }

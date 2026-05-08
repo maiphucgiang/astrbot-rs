@@ -1,99 +1,54 @@
 <template>
-  <div class="app">
-    <aside class="sidebar">
-      <div class="brand">AstrBot</div>
-      <nav>
-        <button v-for="item in nav" :key="item.key" :class="{ active: page === item.key }" @click="page = item.key">
-          {{ item.label }}
-        </button>
-      </nav>
-      <div class="status">
-        <span class="dot" :class="{ connected: wsConnected }"></span>
-        {{ wsConnected ? '已连接' : '未连接' }}
-      </div>
-    </aside>
-    <main class="main">
-      <Chat v-if="page === 'chat'" />
-      <Status v-else-if="page === 'status'" />
-      <Providers v-else-if="page === 'providers'" />
-      <Plugins v-else-if="page === 'plugins'" />
-      <Settings v-else-if="page === 'settings'" />
-    </main>
-  </div>
+  <RouterView></RouterView>
+  <WaitingForRestart ref="globalWaitingRef" />
+
+  <!-- 全局唯一 snackbar -->
+  <v-snackbar v-if="toastStore.current" v-model="snackbarShow" :color="toastStore.current.color"
+    :timeout="toastStore.current.timeout" :multi-line="toastStore.current.multiLine"
+    :location="toastStore.current.location" close-on-back>
+    {{ toastStore.current.message }}
+    <template #actions v-if="toastStore.current.closable">
+      <v-btn variant="text" @click="snackbarShow = false">关闭</v-btn>
+    </template>
+  </v-snackbar>
 </template>
 
 <script setup>
-import { ref, provide } from 'vue'
-import Chat from './Chat.vue'
-import Status from './Status.vue'
-import Providers from './Providers.vue'
-import Plugins from './Plugins.vue'
-import Settings from './Settings.vue'
+import { RouterView } from 'vue-router';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useToastStore } from '@/stores/toast'
+import WaitingForRestart from '@/components/shared/WaitingForRestart.vue'
 
-const page = ref('chat')
-const wsConnected = ref(false)
+const toastStore = useToastStore()
+const globalWaitingRef = ref(null)
+let disposeTrayRestartListener = null
 
-provide('wsConnected', wsConnected)
+const snackbarShow = computed({
+  get: () => !!toastStore.current,
+  set: (val) => {
+    if (!val) toastStore.shift()
+  }
+})
 
-const nav = [
-  { key: 'chat', label: '对话' },
-  { key: 'status', label: '状态' },
-  { key: 'providers', label: 'Providers' },
-  { key: 'plugins', label: '插件' },
-  { key: 'settings', label: '设置' },
-]
+onMounted(() => {
+  const desktopBridge = window.astrbotDesktop
+  if (!desktopBridge?.onTrayRestartBackend) {
+    return
+  }
+  disposeTrayRestartListener = desktopBridge.onTrayRestartBackend(async () => {
+    try {
+      await globalWaitingRef.value?.check?.()
+    } catch (error) {
+      globalWaitingRef.value?.stop?.()
+      console.error('Tray restart backend failed:', error)
+    }
+  })
+})
+
+onBeforeUnmount(() => {
+  if (disposeTrayRestartListener) {
+    disposeTrayRestartListener()
+    disposeTrayRestartListener = null
+  }
+})
 </script>
-
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-html, body, #app, .app { height: 100%; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #0d0d12;
-  color: #e8e8e8;
-}
-.app { display: flex; }
-.sidebar {
-  width: 200px;
-  background: #13131a;
-  border-right: 1px solid #1a1a24;
-  display: flex;
-  flex-direction: column;
-  padding: 16px 0;
-}
-.brand {
-  padding: 0 16px 20px;
-  font-size: 18px;
-  font-weight: 700;
-  color: #a855f7;
-  border-bottom: 1px solid #1a1a24;
-  margin-bottom: 8px;
-}
-nav button {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 10px 16px;
-  background: none;
-  border: none;
-  color: #9ca3af;
-  font-size: 14px;
-  cursor: pointer;
-  transition: .15s;
-}
-nav button:hover { color: #e8e8e8; background: #1a1a24; }
-nav button.active { color: #a855f7; background: #1a1a24; border-right: 2px solid #a855f7; }
-.status {
-  margin-top: auto;
-  padding: 12px 16px;
-  font-size: 12px;
-  color: #6b7280;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  border-top: 1px solid #1a1a24;
-}
-.dot { width: 7px; height: 7px; border-radius: 50%; background: #ef4444; }
-.dot.connected { background: #22c55e; }
-.main { flex: 1; overflow: hidden; }
-</style>

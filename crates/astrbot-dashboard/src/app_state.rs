@@ -6,6 +6,7 @@ use astrbot_provider::client::ProviderManager;
 use astrbot_persona::PersonaManager;
 use crate::sse::SseBroadcaster;
 use crate::log_stream::LogBroadcaster;
+use crate::log_buffer::LogBuffer;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -22,6 +23,7 @@ pub struct AppState {
     pub jwt_secret: Option<String>,
     pub admin_password: Option<String>,
     pub log_broadcaster: Option<Arc<LogBroadcaster>>,
+    pub log_buffer: Option<Arc<LogBuffer>>,
     pub persona_registry: Option<Arc<astrbot_core::persona::PersonaRegistry>>,
     pub tool_registry: Option<Arc<astrbot_core::tools::ToolRegistry>>,
     pub backup_manager: Option<Arc<astrbot_core::backup::BackupManager>>,
@@ -52,6 +54,7 @@ impl AppState {
             jwt_secret: None,
             admin_password: None,
             log_broadcaster: None,
+            log_buffer: None,
             persona_registry: None,
             tool_registry: None,
             backup_manager: None,
@@ -81,6 +84,11 @@ impl AppState {
 
     pub fn with_log_broadcaster(mut self, broadcaster: Arc<LogBroadcaster>) -> Self {
         self.log_broadcaster = Some(broadcaster);
+        self
+    }
+
+    pub fn with_log_buffer(mut self, buffer: Arc<LogBuffer>) -> Self {
+        self.log_buffer = Some(buffer);
         self
     }
 

@@ -1,20 +1,19 @@
 use axum::{
     Router,
-    routing::{get, post, put, delete},
+    routing::{get, post},
     extract::{Path, State, Query, WebSocketUpgrade},
     extract::ws::{WebSocket, Message as WsMessage},
     Json,
 };
 use crate::api::{get_enhanced_status, update_config_with_broadcast, broadcast_config_update, broadcast_provider_status, broadcast_plugin_change};
 use crate::app_state::AppState;
-use crate::sse::SseBroadcaster;
 use astrbot_core::config::AstrBotConfig;
+use astrbot_core::provider::{ChatMessage as CoreChatMessage, ChatConfig};
 use astrbot_persona::{PersonaManager, CustomPersonaRequest, ReplyStyle};
-use astrbot_provider::{ChatProvider, ChatMessage, ChatOptions, ProviderConfig};
+use astrbot_provider::{ChatProvider, ChatMessage as ProviderChatMessage, ChatOptions, ProviderConfig};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use tokio::sync::RwLock;
 
 pub async fn start_server(state: AppState) {
@@ -218,7 +217,7 @@ async fn test_provider(State(state): State<AppState>, Path(id): Path<String>) ->
     };
 
     let start = std::time::Instant::now();
-    let test_msg = ChatMessage::user("Hello, this is a connectivity test from AstrBot Dashboard.");
+    let test_msg = ProviderChatMessage::user("Hello, this is a connectivity test from AstrBot Dashboard.");
     let options = ChatOptions::default();
     let result = _test_provider_chat(provider_type, config, id, test_msg, options).await;
     let latency_ms = start.elapsed().as_millis() as u64;
@@ -230,7 +229,7 @@ async fn test_provider(State(state): State<AppState>, Path(id): Path<String>) ->
     Json(response)
 }
 
-async fn _test_provider_chat(provider_type: &str, config: ProviderConfig, id: String, test_msg: ChatMessage, options: ChatOptions) -> Value {
+async fn _test_provider_chat(provider_type: &str, config: ProviderConfig, id: String, test_msg: ProviderChatMessage, options: ChatOptions) -> Value {
     let provider: Box<dyn ChatProvider> = match provider_type {
         "openai" => Box::new(astrbot_provider::OpenAiCompatibleProvider::new(config)),
         "moonshot" => Box::new(astrbot_provider::sources::moonshot::create(config.api_key, config.model)),
@@ -569,45 +568,112 @@ async fn update_setting(State(state): State<AppState>, Path(key): Path<String>, 
 }
 
 async fn get_logs(State(state): State<AppState>) -> Json<Value> {
-    Json(json!({"logs": []}))
+    let logs = match &state.log_buffer {
+        Some(buf) => buf.get_recent(500),
+        None => vec![],
+    };
+    Json(json!({"logs": logs}))
 }
 
 async fn chat_ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl axum::response::IntoResponse {
     ws.on_upgrade(move |socket| handle_chat_socket(socket, state))
 }
 
-async fn handle_chat_socket(mut socket: WebSocket, _state: AppState) {
-    use tokio::sync::broadcast;
-    let (_tx, mut rx) = broadcast::channel::<String>(100);
+#[derive(Debug, serde::Deserialize)]
+struct ChatRequest {
+    content: String,
+    #[serde(default)]
+    provider_id: Option<String>,
+    #[serde(default)]
+    stream: bool,
+    #[serde(default)]
+    session_id: Option<String>,
+}
 
+#[derive(Debug, serde::Serialize)]
+struct ChatChunk {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delta: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    finish_reason: Option<String>,
+}
+
+async fn handle_chat_socket(mut socket: WebSocket, state: AppState) {
     loop {
-        tokio::select! {
-            msg = socket.recv() => {
-                match msg {
-                    Some(Ok(WsMessage::Text(text))) => {
-                        let response = format!("Echo: {}", text);
-                        if let Err(e) = socket.send(WsMessage::Text(response)).await {
-                            tracing::warn!("WebSocket send error: {}", e);
-                            break;
+        match socket.recv().await {
+            Some(Ok(WsMessage::Text(text))) => {
+                let req: ChatRequest = match serde_json::from_str(&text) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        let err = json!({"type": "error", "message": format!("Invalid request: {}", e)});
+                        let _ = socket.send(WsMessage::Text(err.to_string())).await;
+                        continue;
+                    }
+                };
+
+                // Hold provider manager lock during chat
+                let lock = state.provider_manager.read().await;
+                let providers = lock.list();
+                let provider = if let Some(ref id) = req.provider_id {
+                    providers.iter().find(|p| p.id() == id).copied()
+                } else {
+                    providers.first().copied()
+                };
+
+                let Some(provider) = provider else {
+                    let err = json!({"type": "error", "message": "No provider available"});
+                    let _ = socket.send(WsMessage::Text(err.to_string())).await;
+                    continue;
+                };
+
+                let messages = vec![CoreChatMessage::user(&req.content)];
+                let config = ChatConfig::default();
+
+                if req.stream {
+                    // Streaming mode — P0 fallback to non-streaming for now
+                    // (provider.chat_stream returns !Unpin stream, needs proper pinning)
+                    match provider.chat(messages, config).await {
+                        Ok(response) => {
+                            let msg = json!({"type": "chunk", "delta": response.content});
+                            let _ = socket.send(WsMessage::Text(msg.to_string())).await;
+                            let done = json!({"type": "done"});
+                            if let Err(e) = socket.send(WsMessage::Text(done.to_string())).await {
+                                tracing::warn!("WS send error: {}", e);
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            let err = json!({"type": "error", "message": format!("Chat error: {}", e)});
+                            let _ = socket.send(WsMessage::Text(err.to_string())).await;
                         }
                     }
-                    Some(Ok(WsMessage::Close(_))) | None => {
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-            event = rx.recv() => {
-                match event {
-                    Ok(msg) => {
-                        if let Err(e) = socket.send(WsMessage::Text(msg)).await {
-                            tracing::warn!("WebSocket broadcast send error: {}", e);
-                            break;
+                } else {
+                    // Non-streaming mode
+                    match provider.chat(messages, config).await {
+                        Ok(response) => {
+                            let msg = json!({"type": "response", "content": response.content});
+                            if let Err(e) = socket.send(WsMessage::Text(msg.to_string())).await {
+                                tracing::warn!("WS send error: {}", e);
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            let err = json!({"type": "error", "message": format!("Chat error: {}", e)});
+                            let _ = socket.send(WsMessage::Text(err.to_string())).await;
                         }
                     }
-                    Err(_) => break,
                 }
             }
+            Some(Ok(WsMessage::Close(_))) | None => {
+                break;
+            }
+            _ => {}
         }
     }
 }
