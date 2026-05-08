@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use crate::routes::AppState;
+use crate::app_state::AppState;
 
 /// JWT claims
 #[derive(Debug, Serialize, Deserialize)]
@@ -24,7 +24,7 @@ pub struct Claims {
 
 /// JWT auth middleware — verifies Bearer token
 pub async fn jwt_middleware(
-    State(state): State<Arc<AppState>>,
+    State(state): State<AppState>,
     req: Request<Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
@@ -71,7 +71,7 @@ pub async fn jwt_middleware(
 
 /// Login handler — generates JWT token
 pub async fn login_handler(
-    State(state): State<Arc<AppState>>,
+    State(state): State<AppState>,
     Json(payload): Json<Value>,
 ) -> Json<Value> {
     let password = payload.get("password").and_then(|v| v.as_str());
@@ -110,6 +110,14 @@ pub async fn login_handler(
     }
 }
 
+/// Logout handler — client-side token discard, server acknowledges
+pub async fn logout_handler() -> Json<Value> {
+    Json(json!({
+        "success": true,
+        "message": "Logged out successfully"
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,5 +131,34 @@ mod tests {
         };
         let json = serde_json::to_string(&claims).unwrap();
         assert!(json.contains("admin"));
+    }
+
+    #[tokio::test]
+    async fn test_login_wrong_password() {
+        let state = AppState::new(
+            Arc::new(tokio::sync::RwLock::new(astrbot_plugin::PluginManager::new(std::path::PathBuf::from("plugins")))),
+            Arc::new(tokio::sync::RwLock::new(astrbot_provider::client::ProviderManager::new())),
+        );
+        let payload = json!({"password": "wrong"});
+        let result = login_handler(State(state), Json(payload)).await;
+        assert_eq!(result.0["success"], false);
+    }
+
+    #[tokio::test]
+    async fn test_login_correct_password_returns_token() {
+        let state = AppState::new(
+            Arc::new(tokio::sync::RwLock::new(astrbot_plugin::PluginManager::new(std::path::PathBuf::from("plugins")))),
+            Arc::new(tokio::sync::RwLock::new(astrbot_provider::client::ProviderManager::new())),
+        ).with_jwt("test-secret".to_string(), "astrbot".to_string());
+        let payload = json!({"password": "astrbot"});
+        let result = login_handler(State(state), Json(payload)).await;
+        assert_eq!(result.0["success"], true);
+        assert!(result.0["token"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_logout_returns_success() {
+        let result = logout_handler().await;
+        assert_eq!(result.0["success"], true);
     }
 }

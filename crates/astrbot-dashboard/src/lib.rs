@@ -1,5 +1,6 @@
 pub mod api;
 pub mod app_state;
+pub mod jwt;
 pub mod kb_api;
 pub mod log_buffer;
 pub mod log_stream;

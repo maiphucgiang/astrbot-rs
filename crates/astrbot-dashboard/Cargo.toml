@@ -21,6 +21,7 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
+jsonwebtoken = "9"
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 futures-util = { workspace = true }

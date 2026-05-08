@@ -8,6 +8,7 @@ use axum::{
 use crate::api::{get_enhanced_status, update_config_with_broadcast, broadcast_config_update, broadcast_provider_status, broadcast_plugin_change};
 use crate::app_state::AppState;
 use crate::kb_api::{list_kb_collections, search_kb, index_kb, delete_kb_doc};
+use crate::jwt::{login_handler, logout_handler, jwt_middleware};
 use astrbot_core::config::AstrBotConfig;
 use astrbot_core::provider::{ChatMessage as CoreChatMessage, ChatConfig};
 use astrbot_persona::{PersonaManager, CustomPersonaRequest, ReplyStyle};
@@ -60,7 +61,10 @@ fn build_router(state: AppState) -> Router {
         .route("/api/knowledge-base/search", post(search_kb))
         .route("/api/knowledge-base/index", post(index_kb))
         .route("/api/knowledge-base/:id", delete(delete_kb_doc))
+        .route("/api/login", post(login_handler))
+        .route("/api/logout", post(logout_handler))
         .route("/ws/chat", get(chat_ws_handler))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), jwt_middleware))
         .fallback_service(
             tower_http::services::ServeDir::new("./dashboard/dist")
                 .fallback(tower_http::services::ServeFile::new("./dashboard/dist/index.html"))
