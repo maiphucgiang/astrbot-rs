@@ -200,6 +200,27 @@ impl MetricsCollector {
             "histograms": histograms,
         })
     }
+
+    /// Increment message count for a platform.
+    pub fn increment_message_count(&mut self, platform: &str) {
+        let platform_key = format!("messages.{}", platform);
+        self.counter(&platform_key).inc();
+        self.counter("messages.total").inc();
+    }
+
+    /// Increment provider call count.
+    pub fn increment_provider_call(&mut self, provider_id: &str, success: bool) {
+        let outcome = if success { "success" } else { "failure" };
+        let outcome_key = format!("provider.{}.{}", provider_id, outcome);
+        let total_key = format!("provider.{}.total", provider_id);
+        self.counter(&outcome_key).inc();
+        self.counter(&total_key).inc();
+    }
+
+    /// Alias for snapshot.
+    pub fn get_stats(&self) -> Value {
+        self.snapshot()
+    }
 }
 
 #[cfg(test)]
@@ -243,5 +264,30 @@ mod tests {
         let latency = snap.get("histograms").unwrap().get("latency").unwrap();
         assert_eq!(latency.get("count").unwrap().as_u64(), Some(5));
         assert!(latency.get("p50").unwrap().as_f64().is_some());
+    }
+
+    #[test]
+    fn test_increment_message_count() {
+        let mut m = MetricsCollector::new();
+        m.increment_message_count("qq");
+        m.increment_message_count("qq");
+        m.increment_message_count("telegram");
+        assert_eq!(m.counter("messages.qq").value(), 2);
+        assert_eq!(m.counter("messages.telegram").value(), 1);
+        assert_eq!(m.counter("messages.total").value(), 3);
+    }
+
+    #[test]
+    fn test_increment_provider_call() {
+        let mut m = MetricsCollector::new();
+        m.increment_provider_call("openai", true);
+        m.increment_provider_call("openai", true);
+        m.increment_provider_call("openai", false);
+        m.increment_provider_call("anthropic", true);
+        assert_eq!(m.counter("provider.openai.success").value(), 2);
+        assert_eq!(m.counter("provider.openai.failure").value(), 1);
+        assert_eq!(m.counter("provider.openai.total").value(), 3);
+        assert_eq!(m.counter("provider.anthropic.success").value(), 1);
+        assert_eq!(m.counter("provider.anthropic.total").value(), 1);
     }
 }

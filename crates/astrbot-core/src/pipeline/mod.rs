@@ -183,14 +183,30 @@ impl StageRegistry {
 pub struct PipelineScheduler {
     ctx: Arc<PipelineContext>,
     registry: StageRegistry,
+    metrics_collector: Option<Arc<tokio::sync::Mutex<crate::metrics::MetricsCollector>>>,
 }
 
 impl PipelineScheduler {
     pub fn new(ctx: Arc<PipelineContext>, registry: StageRegistry) -> Self {
-        Self { ctx, registry }
+        Self { ctx, registry, metrics_collector: None }
+    }
+
+    pub fn with_metrics_collector(
+        mut self,
+        mc: Arc<tokio::sync::Mutex<crate::metrics::MetricsCollector>>,
+    ) -> Self {
+        self.metrics_collector = Some(mc);
+        self
     }
 
     pub async fn execute(&self, event: &mut PipelineEvent) -> Result<()> {
+        // Count incoming message by platform
+        let platform = format!("{:?}", event.message.platform).to_lowercase();
+        if let Some(ref mc) = self.metrics_collector {
+            let mut lock = mc.lock().await;
+            lock.increment_message_count(&platform);
+        }
+
         for i in 0..self.registry.stages.len() {
             let (name, stage) = &self.registry.stages[i];
 

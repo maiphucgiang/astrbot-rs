@@ -31,6 +31,8 @@ pub struct ProcessStage {
     default_agent_id: Option<String>,
     /// 插件管理器（消息拦截）
     plugin_manager: Option<Arc<dyn PluginDispatcher>>,
+    /// 指标收集器
+    metrics_collector: Option<Arc<tokio::sync::Mutex<crate::metrics::MetricsCollector>>>,
 }
 
 impl ProcessStage {
@@ -42,6 +44,7 @@ impl ProcessStage {
             session_history: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             default_agent_id: None,
             plugin_manager: None,
+            metrics_collector: None,
         }
     }
 
