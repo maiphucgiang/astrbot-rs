@@ -1,12 +1,13 @@
 use axum::{
     Router,
-    routing::{get, post},
+    routing::{get, post, delete},
     extract::{Path, State, Query, WebSocketUpgrade},
     extract::ws::{WebSocket, Message as WsMessage},
     Json,
 };
 use crate::api::{get_enhanced_status, update_config_with_broadcast, broadcast_config_update, broadcast_provider_status, broadcast_plugin_change};
 use crate::app_state::AppState;
+use crate::kb_api::{list_kb_collections, search_kb, index_kb, delete_kb_doc};
 use astrbot_core::config::AstrBotConfig;
 use astrbot_core::provider::{ChatMessage as CoreChatMessage, ChatConfig};
 use astrbot_persona::{PersonaManager, CustomPersonaRequest, ReplyStyle};
@@ -55,6 +56,10 @@ fn build_router(state: AppState) -> Router {
         .route("/api/settings/:key", get(get_setting).put(update_setting))
         .route("/api/logs", get(get_logs))
         .route("/api/events", get(crate::sse::events_handler))
+        .route("/api/knowledge-base", get(list_kb_collections))
+        .route("/api/knowledge-base/search", post(search_kb))
+        .route("/api/knowledge-base/index", post(index_kb))
+        .route("/api/knowledge-base/:id", delete(delete_kb_doc))
         .route("/ws/chat", get(chat_ws_handler))
         .fallback_service(
             tower_http::services::ServeDir::new("./dashboard/dist")

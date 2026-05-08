@@ -32,6 +32,7 @@ pub struct AppState {
     pub webhook_manager: Option<Arc<astrbot_core::webhook::WebhookManager>>,
     pub safety_engine: Option<Arc<astrbot_core::safety::SafetyEngine>>,
     pub metrics_collector: Option<Arc<Mutex<astrbot_core::metrics::MetricsCollector>>>,
+    pub kb_manager: Option<Arc<astrbot_core::kb::manager::KbManager>>,
 }
 
 impl AppState {
@@ -63,6 +64,7 @@ impl AppState {
             webhook_manager: None,
             safety_engine: None,
             metrics_collector: None,
+            kb_manager: None,
         }
     }
 
@@ -134,6 +136,11 @@ impl AppState {
 
     pub fn with_metrics_collector(mut self, mc: Arc<Mutex<astrbot_core::metrics::MetricsCollector>>) -> Self {
         self.metrics_collector = Some(mc);
+        self
+    }
+
+    pub fn with_kb_manager(mut self, km: Arc<astrbot_core::kb::manager::KbManager>) -> Self {
+        self.kb_manager = Some(km);
         self
     }
 
