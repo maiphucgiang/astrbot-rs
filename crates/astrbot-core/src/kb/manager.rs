@@ -39,10 +39,16 @@ struct ProviderEmbeddingAdapter {
 
 #[async_trait]
 impl EmbeddingProvider for ProviderEmbeddingAdapter {
-    fn id(&self) -> &str { self.provider.id() }
-    fn name(&self) -> &str { self.provider.name() }
+    fn id(&self) -> &str {
+        self.provider.id()
+    }
+    fn name(&self) -> &str {
+        self.provider.name()
+    }
     async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
-        self.provider.embedding(texts, Some(self.model.clone())).await
+        self.provider
+            .embedding(texts, Some(self.model.clone()))
+            .await
     }
     async fn health_check(&self) -> Result<bool> {
         self.provider.health_check().await
@@ -84,11 +90,9 @@ impl KbManager {
     }
 
     pub async fn delete_kb(&self, name: &str) -> Result<()> {
-        let config = self
-            .configs
-            .remove(name)
-            .map(|(_, c)| c)
-            .ok_or_else(|| AstrBotError::NotFound(format!("Knowledge base '{}' not found", name)))?;
+        let config = self.configs.remove(name).map(|(_, c)| c).ok_or_else(|| {
+            AstrBotError::NotFound(format!("Knowledge base '{}' not found", name))
+        })?;
 
         if let Some((_, doc_chunks)) = self.kb_doc_chunks.remove(name) {
             for entry in doc_chunks.iter() {
@@ -116,10 +120,7 @@ impl KbManager {
         self.configs.get(name).map(|entry| entry.clone())
     }
 
-    pub fn get_kb_tools(
-        &self,
-        name: &str,
-    ) -> Option<(KbSearchTool, KbIndexTool, KbDeleteTool)> {
+    pub fn get_kb_tools(&self, name: &str) -> Option<(KbSearchTool, KbIndexTool, KbDeleteTool)> {
         let config = self.configs.get(name)?.clone();
         let doc_chunks = self.kb_doc_chunks.get(name)?.clone();
 
@@ -218,10 +219,7 @@ mod tests {
             .await
             .unwrap();
 
-        let r = search
-            .execute(&json!({ "query": "rust" }))
-            .await
-            .unwrap();
+        let r = search.execute(&json!({ "query": "rust" })).await.unwrap();
         match r {
             ToolResult::Success { output } => {
                 let arr = output.as_array().unwrap();
@@ -233,10 +231,7 @@ mod tests {
         manager.delete_kb("del").await.unwrap();
         assert!(!manager.has_kb("del"));
 
-        let r = search
-            .execute(&json!({ "query": "rust" }))
-            .await
-            .unwrap();
+        let r = search.execute(&json!({ "query": "rust" })).await.unwrap();
         match r {
             ToolResult::Success { output } => {
                 let arr = output.as_array().unwrap();

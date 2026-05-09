@@ -4,9 +4,9 @@
 //!
 //! Pattern: user input → LLM → tool_calls → execute tool → result回传 → 循环至完成或 max_iterations
 
-use crate::errors::{AstrBotError, Result};
-use crate::provider::{ChatMessage, ChatConfig};
 use super::{AgentContext, AgentResult, ToolCall, ToolResult};
+use crate::errors::{AstrBotError, Result};
+use crate::provider::{ChatConfig, ChatMessage};
 use serde_json::json;
 use std::collections::HashSet;
 use tracing::{error, info, warn};
@@ -98,7 +98,10 @@ impl FnToolExecutor {
     where
         F: Fn(&ToolCall, &AgentContext) -> Result<ToolResult> + Send + Sync + 'static,
     {
-        Self { schemas, f: Box::new(f) }
+        Self {
+            schemas,
+            f: Box::new(f),
+        }
     }
 }
 
@@ -194,7 +197,8 @@ impl ToolCallingAgentExecutor {
             self.compress_context_if_needed(&mut messages);
 
             // --- Pre-LLM hook ---
-            self.run_hooks(HookPoint::PreLlmCall, iteration, &messages, None).await?;
+            self.run_hooks(HookPoint::PreLlmCall, iteration, &messages, None)
+                .await?;
 
             // --- LLM call with empty-output retry ---
             let response = self
@@ -202,11 +206,24 @@ impl ToolCallingAgentExecutor {
                 .await?;
 
             // --- Post-LLM hook ---
-            match self.run_hooks(HookPoint::PostLlmCall, iteration, &messages, Some(&response)).await? {
+            match self
+                .run_hooks(
+                    HookPoint::PostLlmCall,
+                    iteration,
+                    &messages,
+                    Some(&response),
+                )
+                .await?
+            {
                 HookDecision::Continue => {}
-                HookDecision::Abort { reason, result_text } => {
+                HookDecision::Abort {
+                    reason,
+                    result_text,
+                } => {
                     warn!("[ToolLoop] Aborted by hook at PostLlmCall: {}", reason);
-                    return Ok(AgentResult::Text { content: result_text });
+                    return Ok(AgentResult::Text {
+                        content: result_text,
+                    });
                 }
                 HookDecision::Retry { hint } => {
                     warn!("[ToolLoop] Hook retry hint: {}", hint);
@@ -229,7 +246,8 @@ impl ToolCallingAgentExecutor {
                     .unwrap_or("")
                     .to_string();
 
-                self.run_hooks(HookPoint::PreReturn, iteration, &messages, Some(&response)).await?;
+                self.run_hooks(HookPoint::PreReturn, iteration, &messages, Some(&response))
+                    .await?;
                 return Ok(AgentResult::Text { content });
             }
 
@@ -262,13 +280,25 @@ impl ToolCallingAgentExecutor {
                 duplicate_tracker.record(&call);
 
                 // --- Pre-tool hook ---
-                self.run_hooks(HookPoint::PreToolExecute, iteration, &messages, Some(&call_raw)).await?;
+                self.run_hooks(
+                    HookPoint::PreToolExecute,
+                    iteration,
+                    &messages,
+                    Some(&call_raw),
+                )
+                .await?;
 
                 // Execute
                 let result = executor.execute(&call, ctx).await?;
 
                 // --- Post-tool hook ---
-                self.run_hooks(HookPoint::PostToolExecute, iteration, &messages, Some(&call_raw)).await?;
+                self.run_hooks(
+                    HookPoint::PostToolExecute,
+                    iteration,
+                    &messages,
+                    Some(&call_raw),
+                )
+                .await?;
 
                 // --- Result overflow handling ---
                 let result_content = self.truncate_tool_result(&result);
@@ -283,7 +313,13 @@ impl ToolCallingAgentExecutor {
         }
 
         // Max iterations reached
-        self.run_hooks(HookPoint::OnMaxIterations, self.max_iterations, &messages, None).await?;
+        self.run_hooks(
+            HookPoint::OnMaxIterations,
+            self.max_iterations,
+            &messages,
+            None,
+        )
+        .await?;
         Ok(AgentResult::Text {
             content: "[Max iterations reached]".to_string(),
         })
@@ -325,7 +361,12 @@ impl ToolCallingAgentExecutor {
     fn compress_context_if_needed(&self, messages: &mut Vec<serde_json::Value>) {
         let total_chars: usize = messages
             .iter()
-            .map(|m| m.get("content").and_then(|v| v.as_str()).map(|s| s.len()).unwrap_or(0))
+            .map(|m| {
+                m.get("content")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.len())
+                    .unwrap_or(0)
+            })
             .sum();
 
         if total_chars <= self.max_context_chars {
@@ -399,7 +440,10 @@ impl ToolCallingAgentExecutor {
         last_response: Option<&serde_json::Value>,
     ) -> Result<HookDecision> {
         for hook in &self.hooks {
-            match hook.invoke(point, iteration, messages, last_response).await? {
+            match hook
+                .invoke(point, iteration, messages, last_response)
+                .await?
+            {
                 HookDecision::Continue => continue,
                 decision @ (HookDecision::Abort { .. } | HookDecision::Retry { .. }) => {
                     return Ok(decision);
@@ -430,7 +474,9 @@ struct DuplicateToolTracker {
 
 impl DuplicateToolTracker {
     fn new() -> Self {
-        Self { seen: HashSet::new() }
+        Self {
+            seen: HashSet::new(),
+        }
     }
 
     fn record(&mut self, call: &ToolCall) {
@@ -480,7 +526,11 @@ fn parse_tool_call(raw: &serde_json::Value) -> Result<ToolCall> {
         .to_string();
     let arguments = function.get("arguments").cloned().unwrap_or(json!({}));
 
-    Ok(ToolCall { id, name, arguments })
+    Ok(ToolCall {
+        id,
+        name,
+        arguments,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -502,10 +552,16 @@ impl ToolLoopHook for MetricsHook {
         let msg_count = messages.len();
         match point {
             HookPoint::PreLlmCall => {
-                info!("[ToolLoop] Iteration {} — {} messages in context", iteration, msg_count);
+                info!(
+                    "[ToolLoop] Iteration {} — {} messages in context",
+                    iteration, msg_count
+                );
             }
             HookPoint::PostToolExecute => {
-                info!("[ToolLoop] Iteration {} — tool executed, {} messages", iteration, msg_count);
+                info!(
+                    "[ToolLoop] Iteration {} — tool executed, {} messages",
+                    iteration, msg_count
+                );
             }
             HookPoint::OnMaxIterations => {
                 warn!("[ToolLoop] Max iterations ({}) reached", iteration);
@@ -531,7 +587,9 @@ mod tests {
 
     impl MockLlmCaller {
         fn new(responses: Vec<serde_json::Value>) -> Self {
-            Self { responses: std::sync::Mutex::new(responses) }
+            Self {
+                responses: std::sync::Mutex::new(responses),
+            }
         }
     }
 
@@ -664,8 +722,7 @@ mod tests {
             extras: Default::default(),
         };
 
-        let executor = ToolCallingAgentExecutor::new()
-            .with_max_context_chars(5000);
+        let executor = ToolCallingAgentExecutor::new().with_max_context_chars(5000);
         let result = executor.execute_loop(&tools, &llm, &ctx).await.unwrap();
 
         match result {
@@ -698,8 +755,7 @@ mod tests {
             extras: Default::default(),
         };
 
-        let executor = ToolCallingAgentExecutor::new()
-            .with_empty_retry(2);
+        let executor = ToolCallingAgentExecutor::new().with_empty_retry(2);
         let result = executor.execute_loop(&tools, &llm, &ctx).await.unwrap();
 
         match result {
@@ -746,8 +802,7 @@ mod tests {
             extras: Default::default(),
         };
 
-        let executor = ToolCallingAgentExecutor::new()
-            .with_max_tool_result_chars(100);
+        let executor = ToolCallingAgentExecutor::new().with_max_tool_result_chars(100);
         let result = executor.execute_loop(&tools, &llm, &ctx).await.unwrap();
 
         match result {

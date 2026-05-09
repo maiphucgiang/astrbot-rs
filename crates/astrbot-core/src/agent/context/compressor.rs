@@ -6,7 +6,9 @@ pub struct ContextCompressor {
 
 impl Default for ContextCompressor {
     fn default() -> Self {
-        Self { max_full_messages: 4 }
+        Self {
+            max_full_messages: 4,
+        }
     }
 }
 
@@ -26,7 +28,11 @@ impl ContextCompressor {
             let mut seen = std::collections::HashSet::new();
             roles.into_iter().filter(|r| seen.insert(*r)).collect()
         };
-        let summary = format!("[{} earlier messages summarized. Roles: {}]", old.len(), unique_roles.join(", "));
+        let summary = format!(
+            "[{} earlier messages summarized. Roles: {}]",
+            old.len(),
+            unique_roles.join(", ")
+        );
         let summary_msg = Message {
             role: "system".to_string(),
             content: summary,
@@ -55,7 +61,11 @@ mod tests {
     #[test]
     fn no_compress_when_under_limit() {
         let compressor = ContextCompressor::new(4);
-        let mut history = vec![msg("user", "hello"), msg("assistant", "hi"), msg("user", "how are you")];
+        let mut history = vec![
+            msg("user", "hello"),
+            msg("assistant", "hi"),
+            msg("user", "how are you"),
+        ];
         compressor.compress(&mut history);
         assert_eq!(history.len(), 3);
         assert_eq!(history[0].role, "user");
@@ -64,7 +74,13 @@ mod tests {
     #[test]
     fn compresses_oldest_messages() {
         let compressor = ContextCompressor::new(2);
-        let mut history = vec![msg("user", "q1"), msg("assistant", "a1"), msg("user", "q2"), msg("assistant", "a2"), msg("user", "q3")];
+        let mut history = vec![
+            msg("user", "q1"),
+            msg("assistant", "a1"),
+            msg("user", "q2"),
+            msg("assistant", "a2"),
+            msg("user", "q3"),
+        ];
         compressor.compress(&mut history);
         assert_eq!(history.len(), 3);
         assert_eq!(history[0].role, "system");
@@ -85,7 +101,12 @@ mod tests {
     #[test]
     fn summary_contains_unique_roles_only() {
         let compressor = ContextCompressor::new(1);
-        let mut history = vec![msg("user", "u1"), msg("user", "u2"), msg("assistant", "a1"), msg("user", "u3")];
+        let mut history = vec![
+            msg("user", "u1"),
+            msg("user", "u2"),
+            msg("assistant", "a1"),
+            msg("user", "u3"),
+        ];
         compressor.compress(&mut history);
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].role, "system");

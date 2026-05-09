@@ -128,17 +128,21 @@ impl BooterManager {
         }
     }
 
-    pub async fn get_or_create(&self, session_id: &str) -> Result<std::sync::Arc<dyn ComputerBooter>> {
+    pub async fn get_or_create(
+        &self,
+        session_id: &str,
+    ) -> Result<std::sync::Arc<dyn ComputerBooter>> {
         if let Some(entry) = self.booters.get(session_id) {
             if entry.value().available().await {
                 return Ok(std::sync::Arc::clone(entry.value()));
             }
         }
         self.booters.remove(session_id);
-        
+
         let booter: std::sync::Arc<dyn ComputerBooter> = std::sync::Arc::new(LocalBooter::new());
         booter.boot(session_id).await?;
-        self.booters.insert(session_id.to_string(), std::sync::Arc::clone(&booter));
+        self.booters
+            .insert(session_id.to_string(), std::sync::Arc::clone(&booter));
         Ok(booter)
     }
 
@@ -149,7 +153,10 @@ impl BooterManager {
             booter.upload_file(&zip_path, "skills.zip").await?;
         }
         let scan_result = booter.exec("import json, os; skills=[]; [skills.append({'name': d}) for d in os.listdir('/tmp/astrbot_computer') if os.path.isdir(d)]; print(json.dumps(skills))").await?;
-        info!("[Computer] Skills sync for {}: {}", session_id, scan_result.stdout);
+        info!(
+            "[Computer] Skills sync for {}: {}",
+            session_id, scan_result.stdout
+        );
         Ok(())
     }
 }

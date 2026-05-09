@@ -103,9 +103,11 @@ impl BackupManager {
             AstrBotError::Internal(format!("Failed to read backup directory: {}", e))
         })?;
 
-        while let Some(entry) = entries.next_entry().await.map_err(|e| {
-            AstrBotError::Internal(format!("Failed to read directory entry: {}", e))
-        })? {
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| AstrBotError::Internal(format!("Failed to read directory entry: {}", e)))?
+        {
             let path = entry.path();
             let id = match entry.file_name().into_string() {
                 Ok(name) => name,
@@ -124,12 +126,9 @@ impl BackupManager {
                 let h: u32 = tp[0..2].parse().unwrap_or(0);
                 let mn: u32 = tp[2..4].parse().unwrap_or(0);
                 let s: u32 = tp[4..6].parse().unwrap_or(0);
-                match chrono::NaiveDate::from_ymd_opt(y, m, d)
-                    .and_then(|d| d.and_hms_opt(h, mn, s))
+                match chrono::NaiveDate::from_ymd_opt(y, m, d).and_then(|d| d.and_hms_opt(h, mn, s))
                 {
-                    Some(naive) => {
-                        DateTime::<Utc>::from_naive_utc_and_offset(naive, chrono::Utc)
-                    }
+                    Some(naive) => DateTime::<Utc>::from_naive_utc_and_offset(naive, chrono::Utc),
                     None => Utc::now(),
                 }
             } else {
@@ -144,7 +143,10 @@ impl BackupManager {
                 0
             };
             let config_size = if config_path.exists() {
-                fs::metadata(&config_path).await.map(|m| m.len()).unwrap_or(0)
+                fs::metadata(&config_path)
+                    .await
+                    .map(|m| m.len())
+                    .unwrap_or(0)
             } else {
                 0
             };
@@ -226,17 +228,18 @@ pub async fn export_config(config: &AstrBotConfig, path: impl AsRef<Path>) -> Re
 /// Import `AstrBotConfig` from JSON with validation
 pub async fn import_config(path: impl AsRef<Path>) -> Result<AstrBotConfig> {
     let path = path.as_ref();
-    let content = fs::read_to_string(path).await.map_err(|e| {
-        AstrBotError::Config(format!("Failed to read '{}': {}", path.display(), e))
-    })?;
-    let cfg: AstrBotConfig = serde_json::from_str(&content).map_err(|e| {
-        AstrBotError::Config(format!("Invalid JSON '{}': {}", path.display(), e))
-    })?;
+    let content = fs::read_to_string(path)
+        .await
+        .map_err(|e| AstrBotError::Config(format!("Failed to read '{}': {}", path.display(), e)))?;
+    let cfg: AstrBotConfig = serde_json::from_str(&content)
+        .map_err(|e| AstrBotError::Config(format!("Invalid JSON '{}': {}", path.display(), e)))?;
     if cfg.nickname.trim().is_empty() {
         return Err(AstrBotError::Validation("nickname cannot be empty".into()));
     }
     if cfg.prefixes.is_empty() {
-        return Err(AstrBotError::Validation("at least one prefix required".into()));
+        return Err(AstrBotError::Validation(
+            "at least one prefix required".into(),
+        ));
     }
     for p in &cfg.prefixes {
         if p.trim().is_empty() {
@@ -253,12 +256,14 @@ pub async fn list_backup_configs(dir: impl AsRef<Path>) -> Result<Vec<PathBuf>> 
     if !dir.exists() {
         return Ok(files);
     }
-    let mut entries = fs::read_dir(dir).await.map_err(|e| {
-        AstrBotError::Internal(format!("Failed to read dir: {}", e))
-    })?;
-    while let Some(e) = entries.next_entry().await.map_err(|e| {
-        AstrBotError::Internal(format!("Failed to read entry: {}", e))
-    })? {
+    let mut entries = fs::read_dir(dir)
+        .await
+        .map_err(|e| AstrBotError::Internal(format!("Failed to read dir: {}", e)))?;
+    while let Some(e) = entries
+        .next_entry()
+        .await
+        .map_err(|e| AstrBotError::Internal(format!("Failed to read entry: {}", e)))?
+    {
         let p = e.path();
         if p.is_file() && p.extension().and_then(|s| s.to_str()) == Some("json") {
             files.push(p);
@@ -394,31 +399,46 @@ mod tests {
         let bp = td.join("bad.json");
         fs::create_dir_all(&td).await.unwrap();
         // empty nickname
-        fs::write(&bp, json!({"nickname":" ","prefixes":["/"],"log_level":"info"}).to_string())
-            .await
-            .unwrap();
+        fs::write(
+            &bp,
+            json!({"nickname":" ","prefixes":["/"],"log_level":"info"}).to_string(),
+        )
+        .await
+        .unwrap();
         let err = import_config(&bp).await.unwrap_err().to_string();
         println!("DEBUG empty nickname err: {}", err);
         assert!(err.contains("nickname"), "expected 'nickname' in: {}", err);
         // empty prefixes
-        fs::write(&bp, json!({"nickname":"B","prefixes":[],"log_level":"info"}).to_string())
+        fs::write(
+            &bp,
+            json!({"nickname":"B","prefixes":[],"log_level":"info"}).to_string(),
+        )
+        .await
+        .unwrap();
+        assert!(import_config(&bp)
             .await
-            .unwrap();
-        assert!(import_config(&bp).await.unwrap_err().to_string().contains("prefix"));
+            .unwrap_err()
+            .to_string()
+            .contains("prefix"));
         // empty prefix string
-        fs::write(&bp, json!({"nickname":"B","prefixes":[""],"log_level":"info"}).to_string())
+        fs::write(
+            &bp,
+            json!({"nickname":"B","prefixes":[""],"log_level":"info"}).to_string(),
+        )
+        .await
+        .unwrap();
+        assert!(import_config(&bp)
             .await
-            .unwrap();
-        assert!(import_config(&bp).await.unwrap_err().to_string().contains("prefix"));
+            .unwrap_err()
+            .to_string()
+            .contains("prefix"));
         // bad json
         fs::write(&bp, b"not json").await.unwrap();
-        assert!(
-            import_config(&bp)
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("Invalid")
-        );
+        assert!(import_config(&bp)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid"));
         let _ = fs::remove_dir_all(&td).await;
     }
 
@@ -434,7 +454,10 @@ mod tests {
         assert_eq!(f.len(), 2);
         assert!(f.iter().any(|p| p.file_name().unwrap() == "a.json"));
         assert!(f.iter().any(|p| p.file_name().unwrap() == "b.json"));
-        assert!(list_backup_configs(td.join("none")).await.unwrap().is_empty());
+        assert!(list_backup_configs(td.join("none"))
+            .await
+            .unwrap()
+            .is_empty());
         let _ = fs::remove_dir_all(&td).await;
     }
 }

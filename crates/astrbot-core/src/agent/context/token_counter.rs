@@ -106,10 +106,7 @@ mod tests {
     #[test]
     fn count_history() {
         let counter = TokenCounter::new();
-        let history = vec![
-            msg("user", "hello"),
-            msg("assistant", "你好"),
-        ];
+        let history = vec![msg("user", "hello"), msg("assistant", "你好")];
         assert_eq!(counter.count_history(&history), 30);
     }
 

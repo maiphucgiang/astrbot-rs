@@ -8,12 +8,12 @@
 //!
 //! 会话 KV：Coze 的 conversation_id 自动维护，本地缓存 user_id → conversation_id 映射。
 
-use async_trait::async_trait;
+use super::{AgentConfig, AgentContext, AgentExecutor, AgentResult, ToolResult};
 use crate::errors::{AstrBotError, Result};
 use crate::message::MessageChain;
 use crate::platform::MessageSource;
-use crate::provider::{ChatMessage, ChatConfig};
-use super::{AgentContext, AgentResult, AgentExecutor, AgentConfig, ToolResult};
+use crate::provider::{ChatConfig, ChatMessage};
+use async_trait::async_trait;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -168,8 +168,8 @@ impl CozeClient {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::AUTHORIZATION,
-            reqwest::header::HeaderValue::from_str(&format!("Bearer {}", self.api_token)
-            ).unwrap_or_else(|_| reqwest::header::HeaderValue::from_static("")),
+            reqwest::header::HeaderValue::from_str(&format!("Bearer {}", self.api_token))
+                .unwrap_or_else(|_| reqwest::header::HeaderValue::from_static("")),
         );
         headers.insert(
             reqwest::header::CONTENT_TYPE,
@@ -196,7 +196,8 @@ impl CozeClient {
         };
 
         let url = format!("{}/v3/chat", self.base_url);
-        let resp = self.http_client
+        let resp = self
+            .http_client
             .post(&url)
             .headers(self.auth_headers())
             .json(&body)
@@ -213,8 +214,9 @@ impl CozeClient {
             });
         }
 
-        let parsed: CozeChatResponse = serde_json::from_str(&body_text)
-            .map_err(|e| AstrBotError::Serialization(format!("Coze parse failed: {} — body: {}", e, body_text)))?;
+        let parsed: CozeChatResponse = serde_json::from_str(&body_text).map_err(|e| {
+            AstrBotError::Serialization(format!("Coze parse failed: {} — body: {}", e, body_text))
+        })?;
 
         if parsed.code != 0 {
             return Err(AstrBotError::Platform {
@@ -223,21 +225,23 @@ impl CozeClient {
             });
         }
 
-        let chat_data = parsed.data.ok_or_else(|| {
-            AstrBotError::Platform {
-                adapter: "Coze".to_string(),
-                message: "Coze response missing data".to_string(),
-            }
+        let chat_data = parsed.data.ok_or_else(|| AstrBotError::Platform {
+            adapter: "Coze".to_string(),
+            message: "Coze response missing data".to_string(),
         })?;
 
         // Cache conversation_id
         if !chat_data.conversation_id.is_empty() {
-            self.session_store.set(user_id, &chat_data.conversation_id).await;
+            self.session_store
+                .set(user_id, &chat_data.conversation_id)
+                .await;
         }
 
         // Poll if still in progress
         if chat_data.status == "in_progress" {
-            let final_data = self.poll_chat(&chat_data.conversation_id, &chat_data.id, user_id).await?;
+            let final_data = self
+                .poll_chat(&chat_data.conversation_id, &chat_data.id, user_id)
+                .await?;
             return Ok(final_data);
         }
 
@@ -260,7 +264,8 @@ impl CozeClient {
         for attempt in 0..30 {
             sleep(Duration::from_secs(1)).await;
 
-            let resp = self.http_client
+            let resp = self
+                .http_client
                 .post(&url)
                 .headers(self.auth_headers())
                 .json(&body)
@@ -269,8 +274,9 @@ impl CozeClient {
                 .map_err(|e| AstrBotError::Network(format!("Coze poll failed: {}", e)))?;
 
             let body_text = resp.text().await.unwrap_or_default();
-            let parsed: CozeChatResponse = serde_json::from_str(&body_text)
-                .map_err(|e| AstrBotError::Serialization(format!("Coze poll parse failed: {}", e)))?;
+            let parsed: CozeChatResponse = serde_json::from_str(&body_text).map_err(|e| {
+                AstrBotError::Serialization(format!("Coze poll parse failed: {}", e))
+            })?;
 
             if parsed.code != 0 {
                 return Err(AstrBotError::Platform {
@@ -317,7 +323,8 @@ impl CozeClient {
         };
 
         let url = format!("{}/v3/chat/stream", self.base_url);
-        let resp = self.http_client
+        let resp = self
+            .http_client
             .post(&url)
             .headers(self.auth_headers())
             .json(&body)
@@ -501,10 +508,7 @@ impl AgentExecutor for CozeAgentExecutor {
         }
 
         // Use non-streaming API for agent executor (returns complete response)
-        let result = self.client.chat(&ctx.user_id,
-            coze_messages,
-            None,
-        ).await?;
+        let result = self.client.chat(&ctx.user_id, coze_messages, None).await?;
 
         Ok(AgentResult::Text {
             content: result.answer,
@@ -551,10 +555,7 @@ impl AgentExecutor for CozeAgentExecutor {
             });
         }
 
-        let result = self.client.chat(&ctx.user_id,
-            coze_messages,
-            None,
-        ).await?;
+        let result = self.client.chat(&ctx.user_id, coze_messages, None).await?;
 
         Ok(AgentResult::Text {
             content: result.answer,
@@ -567,7 +568,9 @@ impl AgentExecutor for CozeAgentExecutor {
             None => {
                 // Try a lightweight call
                 let url = format!("{}/v3/bot/info", self.client.base_url);
-                let resp = self.client.http_client
+                let resp = self
+                    .client
+                    .http_client
                     .get(&url)
                     .headers(self.client.auth_headers())
                     .query(&[("bot_id", self.client.bot_id.as_str())])

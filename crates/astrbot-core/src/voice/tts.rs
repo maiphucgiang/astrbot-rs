@@ -299,22 +299,32 @@ impl TtsProvider for EdgeTts {
 // ---------------------------------------------------------------------------
 
 pub struct FishAudioTts {
-    #[allow(dead_code)] api_key: String,
-    #[allow(dead_code)] model: String,
+    #[allow(dead_code)]
+    api_key: String,
+    #[allow(dead_code)]
+    model: String,
 }
 
 impl FishAudioTts {
     pub fn new(api_key: String) -> Self {
-        Self { api_key, model: "default".to_string() }
+        Self {
+            api_key,
+            model: "default".to_string(),
+        }
     }
-    pub fn with_model(mut self, model: String) -> Self { self.model = model; self }
+    pub fn with_model(mut self, model: String) -> Self {
+        self.model = model;
+        self
+    }
 }
 
 #[async_trait]
 impl TtsEngine for FishAudioTts {
     async fn synthesize(&self, _text: &str) -> Result<Bytes> {
         info!("[FishAudioTts] synthesize — skeleton");
-        Err(AstrBotError::Internal("FishAudio TTS skeleton — not yet implemented".to_string()))
+        Err(AstrBotError::Internal(
+            "FishAudio TTS skeleton — not yet implemented".to_string(),
+        ))
     }
     async fn health_check(&self) -> Result<()> {
         let client = reqwest::Client::new();
@@ -324,19 +334,34 @@ impl TtsEngine for FishAudioTts {
             .send()
             .await
             .map_err(|e| AstrBotError::Network(format!("FishAudio health: {}", e)))?;
-        if resp.status().is_success() { Ok(()) } else {
-            Err(AstrBotError::Network(format!("FishAudio health failed: HTTP {}", resp.status())))
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(AstrBotError::Network(format!(
+                "FishAudio health failed: HTTP {}",
+                resp.status()
+            )))
         }
     }
 }
 
 #[async_trait]
 impl TtsProvider for FishAudioTts {
-    fn id(&self) -> &str { "fishaudio_tts" }
-    fn name(&self) -> &str { "FishAudio TTS" }
-    async fn synthesize(&self, text: &str) -> Result<Bytes> { TtsEngine::synthesize(self, text).await }
-    async fn health_check(&self) -> Result<()> { TtsEngine::health_check(self).await }
-    async fn voices(&self) -> Result<Vec<String>> { Ok(vec![self.model.clone()]) }
+    fn id(&self) -> &str {
+        "fishaudio_tts"
+    }
+    fn name(&self) -> &str {
+        "FishAudio TTS"
+    }
+    async fn synthesize(&self, text: &str) -> Result<Bytes> {
+        TtsEngine::synthesize(self, text).await
+    }
+    async fn health_check(&self) -> Result<()> {
+        TtsEngine::health_check(self).await
+    }
+    async fn voices(&self) -> Result<Vec<String>> {
+        Ok(vec![self.model.clone()])
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -357,7 +382,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_azure_tts_voices() {
-        let tts = AzureTts::new("westus".into(), "key".into()).with_voice("zh-CN-XiaoxiaoNeural".into());
+        let tts =
+            AzureTts::new("westus".into(), "key".into()).with_voice("zh-CN-XiaoxiaoNeural".into());
         let voices = tts.voices().await.unwrap();
         assert!(voices.contains(&"zh-CN-XiaoxiaoNeural".to_string()));
     }
@@ -387,7 +413,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_tts_engine_trait_object() {
-        let tts: Box<dyn TtsEngine> = Box::new(OpenAiTts::new("https://api.openai.com".into(), "sk-test".into()));
+        let tts: Box<dyn TtsEngine> = Box::new(OpenAiTts::new(
+            "https://api.openai.com".into(),
+            "sk-test".into(),
+        ));
         let result = tts.synthesize("test").await;
         assert!(result.is_err());
     }

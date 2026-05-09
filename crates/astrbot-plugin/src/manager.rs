@@ -85,7 +85,8 @@ impl PluginManager {
     }
 
     pub async fn initialize(&self, name: &str) -> Result<()> {
-        let mut entry = self.stars
+        let mut entry = self
+            .stars
             .get_mut(name)
             .ok_or_else(|| AstrBotError::NotFound(format!("Plugin '{}' not loaded", name)))?;
 
@@ -112,7 +113,8 @@ impl PluginManager {
     }
 
     pub async fn start(&self, name: &str) -> Result<()> {
-        let mut entry = self.stars
+        let mut entry = self
+            .stars
             .get_mut(name)
             .ok_or_else(|| AstrBotError::NotFound(format!("Plugin '{}' not loaded", name)))?;
 
@@ -147,7 +149,8 @@ impl PluginManager {
     }
 
     pub async fn stop(&self, name: &str) -> Result<()> {
-        let mut entry = self.stars
+        let mut entry = self
+            .stars
             .get_mut(name)
             .ok_or_else(|| AstrBotError::NotFound(format!("Plugin '{}' not loaded", name)))?;
 
@@ -172,7 +175,8 @@ impl PluginManager {
     }
 
     pub async fn unload(&self, name: &str) -> Result<()> {
-        let mut entry = self.stars
+        let mut entry = self
+            .stars
             .get_mut(name)
             .ok_or_else(|| AstrBotError::NotFound(format!("Plugin '{}' not loaded", name)))?;
 
@@ -240,7 +244,11 @@ impl PluginManager {
             .iter()
             .filter(|e| {
                 e.lifecycle == PluginLifecycle::Running
-                    && e.star.plugin.as_ref().map(|p| p.can_handle(event)).unwrap_or(false)
+                    && e.star
+                        .plugin
+                        .as_ref()
+                        .map(|p| p.can_handle(event))
+                        .unwrap_or(false)
             })
             .map(|e| (e.key().clone(), e.value().star.plugin.is_some()))
             .collect();
@@ -256,7 +264,10 @@ impl PluginManager {
                     match plugin.on_event(event).await {
                         Ok(r) => results.push(r),
                         Err(e) => {
-                            error!("[PluginManager] plugin '{}' event handler error: {}", name, e);
+                            error!(
+                                "[PluginManager] plugin '{}' event handler error: {}",
+                                name, e
+                            );
                         }
                     }
                 }
@@ -395,13 +406,22 @@ mod tests {
         write_plugin(&tmp, "lifecycle_test");
 
         mgr.load("lifecycle_test").await.unwrap();
-        assert_eq!(mgr.get_lifecycle("lifecycle_test"), Some(PluginLifecycle::Loaded));
+        assert_eq!(
+            mgr.get_lifecycle("lifecycle_test"),
+            Some(PluginLifecycle::Loaded)
+        );
 
         mgr.initialize("lifecycle_test").await.unwrap();
-        assert_eq!(mgr.get_lifecycle("lifecycle_test"), Some(PluginLifecycle::Initialized));
+        assert_eq!(
+            mgr.get_lifecycle("lifecycle_test"),
+            Some(PluginLifecycle::Initialized)
+        );
 
         mgr.start("lifecycle_test").await.unwrap();
-        assert_eq!(mgr.get_lifecycle("lifecycle_test"), Some(PluginLifecycle::Running));
+        assert_eq!(
+            mgr.get_lifecycle("lifecycle_test"),
+            Some(PluginLifecycle::Running)
+        );
 
         let _ = tokio::fs::remove_dir_all(&tmp).await;
     }
@@ -416,10 +436,16 @@ mod tests {
         mgr.start("stop_test").await.unwrap();
 
         mgr.stop("stop_test").await.unwrap();
-        assert_eq!(mgr.get_lifecycle("stop_test"), Some(PluginLifecycle::Stopped));
+        assert_eq!(
+            mgr.get_lifecycle("stop_test"),
+            Some(PluginLifecycle::Stopped)
+        );
 
         mgr.unload("stop_test").await.unwrap();
-        assert_eq!(mgr.get_lifecycle("stop_test"), Some(PluginLifecycle::Unloaded));
+        assert_eq!(
+            mgr.get_lifecycle("stop_test"),
+            Some(PluginLifecycle::Unloaded)
+        );
 
         let _ = tokio::fs::remove_dir_all(&tmp).await;
     }

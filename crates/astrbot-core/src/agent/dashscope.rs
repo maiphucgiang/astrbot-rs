@@ -10,11 +10,11 @@
 //! - `output_reference` 启用（引用溯源）
 //! - 多轮对话 `messages` 自动序列化
 
-use async_trait::async_trait;
+use super::{AgentConfig, AgentContext, AgentExecutor, AgentResult, ToolResult};
 use crate::errors::{AstrBotError, Result};
 use crate::message::MessageChain;
 use crate::platform::MessageSource;
-use super::{AgentContext, AgentResult, AgentExecutor, AgentConfig, ToolResult};
+use async_trait::async_trait;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -191,13 +191,16 @@ impl DashScopeClient {
             self.app_id
         );
 
-        let resp = self.http_client
+        let resp = self
+            .http_client
             .post(&url)
             .headers(self.auth_headers(false))
             .json(&body)
             .send()
             .await
-            .map_err(|e| AstrBotError::Network(format!("DashScope completion request failed: {}", e)))?;
+            .map_err(|e| {
+                AstrBotError::Network(format!("DashScope completion request failed: {}", e))
+            })?;
 
         let status = resp.status();
         let body_text = resp.text().await.unwrap_or_default();
@@ -209,12 +212,14 @@ impl DashScopeClient {
             });
         }
 
-        let parsed: DashScopeCompletionResponse = serde_json::from_str(&body_text)
-            .map_err(|e| AstrBotError::Serialization(format!(
-                "DashScope response parse error: {} — body: {}",
-                e,
-                &body_text[..body_text.len().min(500)]
-            )))?;
+        let parsed: DashScopeCompletionResponse =
+            serde_json::from_str(&body_text).map_err(|e| {
+                AstrBotError::Serialization(format!(
+                    "DashScope response parse error: {} — body: {}",
+                    e,
+                    &body_text[..body_text.len().min(500)]
+                ))
+            })?;
 
         // Persist session_id from response
         if let Some(ref output) = parsed.output {
@@ -254,13 +259,16 @@ impl DashScopeClient {
             self.app_id
         );
 
-        let resp = self.http_client
+        let resp = self
+            .http_client
             .post(&url)
             .headers(self.auth_headers(true))
             .json(&body)
             .send()
             .await
-            .map_err(|e| AstrBotError::Network(format!("DashScope stream request failed: {}", e)))?;
+            .map_err(|e| {
+                AstrBotError::Network(format!("DashScope stream request failed: {}", e))
+            })?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -274,80 +282,88 @@ impl DashScopeClient {
         let byte_stream = resp.bytes_stream();
         let mut buffer = String::new();
 
-        let stream = futures_util::stream::unfold(
-            (byte_stream, buffer),
-            |(mut stream, mut buf)| Box::pin(async move {
-                loop {
-                    match stream.next().await {
-                        Some(Ok(chunk)) => {
-                            buf.push_str(&String::from_utf8_lossy(&chunk));
-                            // DashScope SSE: each event is a JSON line or SSE block.
-                            while let Some(pos) = buf.find('\n') {
-                                let line = buf.split_off(pos);
-                                let text = buf.trim_start().to_string();
-                                buf = line;
-                                buf.remove(0); // strip '\n'
+        let stream =
+            futures_util::stream::unfold((byte_stream, buffer), |(mut stream, mut buf)| {
+                Box::pin(async move {
+                    loop {
+                        match stream.next().await {
+                            Some(Ok(chunk)) => {
+                                buf.push_str(&String::from_utf8_lossy(&chunk));
+                                // DashScope SSE: each event is a JSON line or SSE block.
+                                while let Some(pos) = buf.find('\n') {
+                                    let line = buf.split_off(pos);
+                                    let text = buf.trim_start().to_string();
+                                    buf = line;
+                                    buf.remove(0); // strip '\n'
 
-                                if text.is_empty() {
-                                    continue;
-                                }
-                                // Try parse as SSE "data:" line
-                                let json_str = if text.starts_with("data:") {
-                                    text.trim_start_matches("data:").trim()
-                                } else {
-                                    text.as_str()
-                                };
-                                if json_str.is_empty() {
-                                    continue;
-                                }
-                                match serde_json::from_str::<DashScopeSseChunk>(json_str) {
-                                    Ok(chunk) => {
-                                        if let Some(output) = chunk.output {
-                                            if !output.text.is_empty() {
-                                                return Some((Ok(output.text), (stream, buf)));
-                                            }
-                                            if !output.session_id.is_empty() {
-                                                // Side-channel: we can't store here easily
-                                                // without &self; caller handles persistence.
+                                    if text.is_empty() {
+                                        continue;
+                                    }
+                                    // Try parse as SSE "data:" line
+                                    let json_str = if text.starts_with("data:") {
+                                        text.trim_start_matches("data:").trim()
+                                    } else {
+                                        text.as_str()
+                                    };
+                                    if json_str.is_empty() {
+                                        continue;
+                                    }
+                                    match serde_json::from_str::<DashScopeSseChunk>(json_str) {
+                                        Ok(chunk) => {
+                                            if let Some(output) = chunk.output {
+                                                if !output.text.is_empty() {
+                                                    return Some((Ok(output.text), (stream, buf)));
+                                                }
+                                                if !output.session_id.is_empty() {
+                                                    // Side-channel: we can't store here easily
+                                                    // without &self; caller handles persistence.
+                                                }
                                             }
                                         }
-                                    }
-                                    Err(_) => {
-                                        // Not a recognized chunk, skip
+                                        Err(_) => {
+                                            // Not a recognized chunk, skip
+                                        }
                                     }
                                 }
                             }
-                        }
-                        Some(Err(e)) => {
-                            return Some((
-                                Err(AstrBotError::Network(format!("DashScope SSE stream error: {}", e))),
-                                (stream, buf),
-                            ));
-                        }
-                        None => {
-                            // Stream ended — try to flush remaining
-                            let trimmed = buf.trim();
-                            if trimmed.is_empty() {
+                            Some(Err(e)) => {
+                                return Some((
+                                    Err(AstrBotError::Network(format!(
+                                        "DashScope SSE stream error: {}",
+                                        e
+                                    ))),
+                                    (stream, buf),
+                                ));
+                            }
+                            None => {
+                                // Stream ended — try to flush remaining
+                                let trimmed = buf.trim();
+                                if trimmed.is_empty() {
+                                    return None;
+                                }
+                                let json_str = if trimmed.starts_with("data:") {
+                                    trimmed.trim_start_matches("data:").trim()
+                                } else {
+                                    trimmed
+                                };
+                                if let Ok(chunk) =
+                                    serde_json::from_str::<DashScopeSseChunk>(json_str)
+                                {
+                                    if let Some(output) = chunk.output {
+                                        if !output.text.is_empty() {
+                                            return Some((
+                                                Ok(output.text),
+                                                (stream, String::new()),
+                                            ));
+                                        }
+                                    }
+                                }
                                 return None;
                             }
-                            let json_str = if trimmed.starts_with("data:") {
-                                trimmed.trim_start_matches("data:").trim()
-                            } else {
-                                trimmed
-                            };
-                            if let Ok(chunk) = serde_json::from_str::<DashScopeSseChunk>(json_str) {
-                                if let Some(output) = chunk.output {
-                                    if !output.text.is_empty() {
-                                        return Some((Ok(output.text), (stream, String::new())));
-                                    }
-                                }
-                            }
-                            return None;
                         }
                     }
-                }
-            }),
-        );
+                })
+            });
 
         Ok(stream)
     }
@@ -373,14 +389,26 @@ impl DashScopeAgentRunner {
             .config
             .get("dashscope_api_key")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| AstrBotError::Config(format!("{}: {}", "dashscope_api_key".to_string(), "Missing DashScope API key".to_string(),)))?
+            .ok_or_else(|| {
+                AstrBotError::Config(format!(
+                    "{}: {}",
+                    "dashscope_api_key".to_string(),
+                    "Missing DashScope API key".to_string(),
+                ))
+            })?
             .to_string();
 
         let app_id = config
             .config
             .get("dashscope_app_id")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| AstrBotError::Config(format!("{}: {}", "dashscope_app_id".to_string(), "Missing DashScope App ID".to_string(),)))?
+            .ok_or_else(|| {
+                AstrBotError::Config(format!(
+                    "{}: {}",
+                    "dashscope_app_id".to_string(),
+                    "Missing DashScope App ID".to_string(),
+                ))
+            })?
             .to_string();
 
         let api_base = config
@@ -406,9 +434,7 @@ impl DashScopeAgentRunner {
             .get("streaming")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        let system_prompt = config
-            .system_prompt
-            .clone();
+        let system_prompt = config.system_prompt.clone();
 
         Ok(Self {
             client: DashScopeClient::new(api_key, app_id).with_base_url(api_base),
@@ -450,7 +476,11 @@ impl DashScopeAgentRunner {
     fn build_parameters(&self) -> DashScopeParameters {
         DashScopeParameters {
             incremental_output: if self.streaming { Some(true) } else { None },
-            output_reference: if self.output_reference { Some(true) } else { None },
+            output_reference: if self.output_reference {
+                Some(true)
+            } else {
+                None
+            },
             rag_options: self.rag_options.clone(),
             has_thoughts: if self.has_thoughts { Some(true) } else { None },
         }
@@ -517,12 +547,17 @@ impl AgentExecutor for DashScopeAgentRunner {
         if let Some(v) = config.get("streaming").and_then(|v| v.as_bool()) {
             self.streaming = v;
         }
-        info!("[DashScope] Runner initialized — app_id={}", self.client.app_id);
+        info!(
+            "[DashScope] Runner initialized — app_id={}",
+            self.client.app_id
+        );
         Ok(())
     }
 
     async fn execute(&self, ctx: &AgentContext) -> Result<AgentResult> {
-        let prompt = ctx.messages.last()
+        let prompt = ctx
+            .messages
+            .last()
             .map(|m| m.content.clone())
             .unwrap_or_default();
 
@@ -531,7 +566,8 @@ impl AgentExecutor for DashScopeAgentRunner {
 
         if self.streaming {
             // Streaming mode: collect all chunks and concatenate
-            let mut stream = self.client
+            let mut stream = self
+                .client
                 .completion_stream(&ctx.user_id, &prompt, messages, parameters)
                 .await?;
 
@@ -550,12 +586,11 @@ impl AgentExecutor for DashScopeAgentRunner {
                 warn!("[DashScope] Streaming returned empty text");
             }
 
-            Ok(AgentResult::Text {
-                content: full_text,
-            })
+            Ok(AgentResult::Text { content: full_text })
         } else {
             // Non-streaming mode
-            let resp = self.client
+            let resp = self
+                .client
                 .completion(&ctx.user_id, &prompt, messages, parameters)
                 .await?;
 
@@ -576,7 +611,11 @@ impl AgentExecutor for DashScopeAgentRunner {
             let content = if tr.success {
                 format!("工具 {} 执行结果: {}", tr.call_id, tr.output)
             } else {
-                format!("工具 {} 执行失败: {}", tr.call_id, tr.error.unwrap_or_default())
+                format!(
+                    "工具 {} 执行失败: {}",
+                    tr.call_id,
+                    tr.error.unwrap_or_default()
+                )
             };
             messages.push(DashScopeMessage {
                 role: "assistant".to_string(),
@@ -584,12 +623,15 @@ impl AgentExecutor for DashScopeAgentRunner {
             });
         }
 
-        let prompt = ctx.messages.last()
+        let prompt = ctx
+            .messages
+            .last()
             .map(|m| m.content.clone())
             .unwrap_or_default();
 
         let parameters = self.build_parameters();
-        let resp = self.client
+        let resp = self
+            .client
             .completion(&ctx.user_id, &prompt, messages, parameters)
             .await?;
 
@@ -598,13 +640,15 @@ impl AgentExecutor for DashScopeAgentRunner {
 
     async fn health_check(&self) -> Result<bool> {
         // Lightweight: hit the apps list endpoint (returns 401 if auth bad, 200 if good).
-        let url = format!(
-            "{}/api/v1/apps",
-            self.client.api_base.trim_end_matches('/')
-        );
-        let resp = self.client.http_client
+        let url = format!("{}/api/v1/apps", self.client.api_base.trim_end_matches('/'));
+        let resp = self
+            .client
+            .http_client
             .get(&url)
-            .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", self.client.api_key))
+            .header(
+                reqwest::header::AUTHORIZATION,
+                format!("Bearer {}", self.client.api_key),
+            )
             .send()
             .await;
         match resp {
@@ -678,7 +722,11 @@ mod tests {
         let runner = DashScopeAgentRunner::new(&config).unwrap();
 
         // Simulate: after first completion, session_id should be cached
-        runner.client.session_store.set("user_1", "sess_abc_123").await;
+        runner
+            .client
+            .session_store
+            .set("user_1", "sess_abc_123")
+            .await;
         let cached = runner.client.session_store.get("user_1").await;
         assert_eq!(cached, Some("sess_abc_123".to_string()));
 
@@ -777,9 +825,10 @@ mod tests {
             input: DashScopeInput {
                 prompt: "测试".to_string(),
                 session_id: Some("sess_1".to_string()),
-                messages: vec![
-                    DashScopeMessage { role: "user".to_string(), content: "hi".to_string() },
-                ],
+                messages: vec![DashScopeMessage {
+                    role: "user".to_string(),
+                    content: "hi".to_string(),
+                }],
             },
             parameters: DashScopeParameters {
                 incremental_output: Some(true),

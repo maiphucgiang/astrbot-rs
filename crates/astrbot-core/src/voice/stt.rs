@@ -19,16 +19,26 @@ pub trait SttEngine: Send + Sync {
 // ---------------------------------------------------------------------------
 
 pub struct OpenAiWhisper {
-    #[allow(dead_code)] base_url: String,
-    #[allow(dead_code)] api_key: String,
-    #[allow(dead_code)] model: String,
+    #[allow(dead_code)]
+    base_url: String,
+    #[allow(dead_code)]
+    api_key: String,
+    #[allow(dead_code)]
+    model: String,
 }
 
 impl OpenAiWhisper {
     pub fn new(base_url: String, api_key: String) -> Self {
-        Self { base_url, api_key, model: "whisper-1".to_string() }
+        Self {
+            base_url,
+            api_key,
+            model: "whisper-1".to_string(),
+        }
     }
-    pub fn with_model(mut self, model: String) -> Self { self.model = model; self }
+    pub fn with_model(mut self, model: String) -> Self {
+        self.model = model;
+        self
+    }
 }
 
 #[async_trait]
@@ -54,7 +64,10 @@ impl SttEngine for OpenAiWhisper {
         let status = resp.status();
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(AstrBotError::Network(format!("Whisper HTTP {}: {}", status, text)));
+            return Err(AstrBotError::Network(format!(
+                "Whisper HTTP {}: {}",
+                status, text
+            )));
         }
         let json: serde_json::Value = resp
             .json()
@@ -66,7 +79,9 @@ impl SttEngine for OpenAiWhisper {
             .unwrap_or("")
             .to_string();
         if text.is_empty() {
-            return Err(AstrBotError::Internal("Whisper returned empty transcription".to_string()));
+            return Err(AstrBotError::Internal(
+                "Whisper returned empty transcription".to_string(),
+            ));
         }
         Ok(text)
     }
@@ -79,10 +94,18 @@ impl SttEngine for OpenAiWhisper {
 
 #[async_trait]
 impl SttProvider for OpenAiWhisper {
-    fn id(&self) -> &str { "openai_whisper" }
-    fn name(&self) -> &str { "OpenAI Whisper" }
-    async fn transcribe(&self, audio: Bytes) -> Result<String> { SttEngine::transcribe(self, audio).await }
-    async fn health_check(&self) -> Result<()> { SttEngine::health_check(self).await }
+    fn id(&self) -> &str {
+        "openai_whisper"
+    }
+    fn name(&self) -> &str {
+        "OpenAI Whisper"
+    }
+    async fn transcribe(&self, audio: Bytes) -> Result<String> {
+        SttEngine::transcribe(self, audio).await
+    }
+    async fn health_check(&self) -> Result<()> {
+        SttEngine::health_check(self).await
+    }
     fn supported_formats(&self) -> Vec<String> {
         vec!["wav".into(), "mp3".into(), "m4a".into(), "ogg".into()]
     }
@@ -92,13 +115,24 @@ impl SttProvider for OpenAiWhisper {
 // Azure STT
 // ---------------------------------------------------------------------------
 
-pub struct AzureStt { region: String, api_key: String, language: String }
+pub struct AzureStt {
+    region: String,
+    api_key: String,
+    language: String,
+}
 
 impl AzureStt {
     pub fn new(region: String, api_key: String) -> Self {
-        Self { region, api_key, language: "en-US".to_string() }
+        Self {
+            region,
+            api_key,
+            language: "en-US".to_string(),
+        }
     }
-    pub fn with_language(mut self, language: String) -> Self { self.language = language; self }
+    pub fn with_language(mut self, language: String) -> Self {
+        self.language = language;
+        self
+    }
 }
 
 #[async_trait]
@@ -109,7 +143,8 @@ impl SttEngine for AzureStt {
         let url = if self.region.starts_with("http://") || self.region.starts_with("https://") {
             format!(
                 "{}/speech/recognition/conversation/cognitiveservices/v1?language={}",
-                self.region.trim_end_matches('/'), self.language
+                self.region.trim_end_matches('/'),
+                self.language
             )
         } else {
             format!(
@@ -120,7 +155,10 @@ impl SttEngine for AzureStt {
         let resp = client
             .post(&url)
             .header("Ocp-Apim-Subscription-Key", &self.api_key)
-            .header("Content-Type", "audio/wav; codecs=audio/pcm; samplerate=16000")
+            .header(
+                "Content-Type",
+                "audio/wav; codecs=audio/pcm; samplerate=16000",
+            )
             .header("Accept", "application/json")
             .body(Vec::from(audio))
             .send()
@@ -129,7 +167,10 @@ impl SttEngine for AzureStt {
         let status = resp.status();
         if !status.is_success() {
             let err = resp.text().await.unwrap_or_default();
-            return Err(AstrBotError::Network(format!("Azure STT HTTP {}: {}", status, err)));
+            return Err(AstrBotError::Network(format!(
+                "Azure STT HTTP {}: {}",
+                status, err
+            )));
         }
         let json: serde_json::Value = resp
             .json()
@@ -138,18 +179,28 @@ impl SttEngine for AzureStt {
         let text = json
             .get("DisplayText")
             .and_then(|v| v.as_str())
-            .or_else(|| json.get("NBest").and_then(|a| a.get(0)).and_then(|o| o.get("Display")).and_then(|v| v.as_str()))
+            .or_else(|| {
+                json.get("NBest")
+                    .and_then(|a| a.get(0))
+                    .and_then(|o| o.get("Display"))
+                    .and_then(|v| v.as_str())
+            })
             .unwrap_or("")
             .to_string();
         if text.is_empty() {
-            return Err(AstrBotError::Internal("Azure STT returned empty transcription".to_string()));
+            return Err(AstrBotError::Internal(
+                "Azure STT returned empty transcription".to_string(),
+            ));
         }
         Ok(text)
     }
 
     async fn health_check(&self) -> Result<()> {
         let client = reqwest::Client::new();
-        let url = format!("https://{}.api.cognitive.microsoft.com/sts/v1.0/issueToken", self.region);
+        let url = format!(
+            "https://{}.api.cognitive.microsoft.com/sts/v1.0/issueToken",
+            self.region
+        );
         let resp = client
             .post(&url)
             .header("Ocp-Apim-Subscription-Key", &self.api_key)
@@ -157,18 +208,31 @@ impl SttEngine for AzureStt {
             .send()
             .await
             .map_err(|e| AstrBotError::Network(format!("Azure STT health: {}", e)))?;
-        if resp.status().is_success() { Ok(()) } else {
-            Err(AstrBotError::Network(format!("Azure STT health failed: HTTP {}", resp.status())))
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(AstrBotError::Network(format!(
+                "Azure STT health failed: HTTP {}",
+                resp.status()
+            )))
         }
     }
 }
 
 #[async_trait]
 impl SttProvider for AzureStt {
-    fn id(&self) -> &str { "azure_stt" }
-    fn name(&self) -> &str { "Azure STT" }
-    async fn transcribe(&self, audio: Bytes) -> Result<String> { SttEngine::transcribe(self, audio).await }
-    async fn health_check(&self) -> Result<()> { SttEngine::health_check(self).await }
+    fn id(&self) -> &str {
+        "azure_stt"
+    }
+    fn name(&self) -> &str {
+        "Azure STT"
+    }
+    async fn transcribe(&self, audio: Bytes) -> Result<String> {
+        SttEngine::transcribe(self, audio).await
+    }
+    async fn health_check(&self) -> Result<()> {
+        SttEngine::health_check(self).await
+    }
     fn supported_formats(&self) -> Vec<String> {
         vec!["wav".into(), "mp3".into(), "ogg".into(), "flac".into()]
     }
@@ -178,11 +242,17 @@ impl SttProvider for AzureStt {
 // SenseVoice (Local)
 // ---------------------------------------------------------------------------
 
-pub struct SenseVoiceStt { model_path: String, python_path: String }
+pub struct SenseVoiceStt {
+    model_path: String,
+    python_path: String,
+}
 
 impl SenseVoiceStt {
     pub fn new(model_path: String, python_path: String) -> Self {
-        Self { model_path, python_path }
+        Self {
+            model_path,
+            python_path,
+        }
     }
 }
 
@@ -207,11 +277,16 @@ impl SttEngine for SenseVoiceStt {
         let _ = tokio::fs::remove_file(&temp_path).await;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(AstrBotError::Internal(format!("SenseVoice failed: {}", stderr)));
+            return Err(AstrBotError::Internal(format!(
+                "SenseVoice failed: {}",
+                stderr
+            )));
         }
         let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if text.is_empty() {
-            return Err(AstrBotError::Internal("SenseVoice returned empty".to_string()));
+            return Err(AstrBotError::Internal(
+                "SenseVoice returned empty".to_string(),
+            ));
         }
         Ok(text)
     }
@@ -223,18 +298,30 @@ impl SttEngine for SenseVoiceStt {
             .output()
             .await
             .map_err(|e| AstrBotError::Internal(format!("SenseVoice health: {}", e)))?;
-        if output.status.success() { Ok(()) } else {
-            Err(AstrBotError::Internal("SenseVoice dependency missing".to_string()))
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(AstrBotError::Internal(
+                "SenseVoice dependency missing".to_string(),
+            ))
         }
     }
 }
 
 #[async_trait]
 impl SttProvider for SenseVoiceStt {
-    fn id(&self) -> &str { "sensevoice" }
-    fn name(&self) -> &str { "SenseVoice (Local)" }
-    async fn transcribe(&self, audio: Bytes) -> Result<String> { SttEngine::transcribe(self, audio).await }
-    async fn health_check(&self) -> Result<()> { SttEngine::health_check(self).await }
+    fn id(&self) -> &str {
+        "sensevoice"
+    }
+    fn name(&self) -> &str {
+        "SenseVoice (Local)"
+    }
+    async fn transcribe(&self, audio: Bytes) -> Result<String> {
+        SttEngine::transcribe(self, audio).await
+    }
+    async fn health_check(&self) -> Result<()> {
+        SttEngine::health_check(self).await
+    }
     fn supported_formats(&self) -> Vec<String> {
         vec!["wav".into(), "mp3".into(), "pcm".into()]
     }
@@ -259,7 +346,8 @@ mod tests {
             let _ = socket.read(&mut buf).await.unwrap();
             let http_response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n{}",
-                response_body.len(), response_body
+                response_body.len(),
+                response_body
             );
             let _ = socket.write_all(http_response.as_bytes()).await;
         });
@@ -272,15 +360,19 @@ mod tests {
         let port = run_mock_http_server(body).await;
         let whisper = OpenAiWhisper {
             base_url: format!("http://127.0.0.1:{}", port),
-            api_key: "test_key".into(), model: "whisper-1".into(),
+            api_key: "test_key".into(),
+            model: "whisper-1".into(),
         };
-        let text = SttEngine::transcribe(&whisper, Bytes::from_static(b"fake_audio")).await.unwrap();
+        let text = SttEngine::transcribe(&whisper, Bytes::from_static(b"fake_audio"))
+            .await
+            .unwrap();
         assert_eq!(text, "Hello world");
     }
 
     #[tokio::test]
     async fn test_whisper_voices_list() {
-        let formats = OpenAiWhisper::new("https://api.openai.com".into(), "sk-test".into()).supported_formats();
+        let formats = OpenAiWhisper::new("https://api.openai.com".into(), "sk-test".into())
+            .supported_formats();
         assert!(formats.contains(&"wav".to_string()));
         assert!(formats.contains(&"mp3".to_string()));
     }
@@ -291,15 +383,20 @@ mod tests {
         let port = run_mock_http_server(body).await;
         let stt = AzureStt {
             region: format!("http://127.0.0.1:{}", port),
-            api_key: "test_key".into(), language: "en-US".into(),
+            api_key: "test_key".into(),
+            language: "en-US".into(),
         };
-        let text = SttEngine::transcribe(&stt, Bytes::from_static(b"fake_audio")).await.unwrap();
+        let text = SttEngine::transcribe(&stt, Bytes::from_static(b"fake_audio"))
+            .await
+            .unwrap();
         assert_eq!(text, "Good morning");
     }
 
     #[tokio::test]
     async fn test_azure_stt_voices_list() {
-        let formats = AzureStt::new("westus".into(), "key".into()).with_language("zh-CN".into()).supported_formats();
+        let formats = AzureStt::new("westus".into(), "key".into())
+            .with_language("zh-CN".into())
+            .supported_formats();
         assert!(formats.contains(&"wav".to_string()));
         assert!(formats.contains(&"flac".to_string()));
     }

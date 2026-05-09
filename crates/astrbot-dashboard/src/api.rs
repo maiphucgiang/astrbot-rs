@@ -1,9 +1,6 @@
 //! Dashboard API handlers — enhanced status, config, and SSE broadcast integration
 
-use axum::{
-    extract::State,
-    Json,
-};
+use axum::{extract::State, Json};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -57,8 +54,10 @@ impl SystemMetrics {
 }
 
 fn get_memory_info() -> (u64, u64) {
-    use sysinfo::{System, RefreshKind};
-    let mut sys = System::new_with_specifics(RefreshKind::new().with_memory(sysinfo::MemoryRefreshKind::everything()));
+    use sysinfo::{RefreshKind, System};
+    let mut sys = System::new_with_specifics(
+        RefreshKind::new().with_memory(sysinfo::MemoryRefreshKind::everything()),
+    );
     sys.refresh_memory();
     let used = sys.used_memory() / 1024 / 1024;
     let total = sys.total_memory() / 1024 / 1024;
@@ -71,13 +70,23 @@ pub async fn broadcast_config_update(state: &AppState, updated_keys: Vec<String>
     }
 }
 
-pub async fn broadcast_provider_status(state: &AppState, provider_id: &str, status: &str, error: Option<String>) {
+pub async fn broadcast_provider_status(
+    state: &AppState,
+    provider_id: &str,
+    status: &str,
+    error: Option<String>,
+) {
     if let Some(ref b) = state.sse_broadcaster {
         b.broadcast_provider_status(provider_id, status, error);
     }
 }
 
-pub async fn broadcast_plugin_change(state: &AppState, plugin_id: &str, action: &str, success: bool) {
+pub async fn broadcast_plugin_change(
+    state: &AppState,
+    plugin_id: &str,
+    action: &str,
+    success: bool,
+) {
     if let Some(ref b) = state.sse_broadcaster {
         b.broadcast_plugin_install(plugin_id, action, success);
     }
@@ -108,7 +117,9 @@ pub async fn update_config_with_broadcast(
             broadcast_config_update(&state, updated_keys).await;
             match persist_result {
                 Ok(_) => Json(json!({"success": true, "persisted": true})),
-                Err(e) => Json(json!({"success": true, "persisted": false, "warning": e.to_string()})),
+                Err(e) => {
+                    Json(json!({"success": true, "persisted": false, "warning": e.to_string()}))
+                }
             }
         }
         Err(e) => Json(json!({"success": false, "error": format!("Invalid config: {}", e)})),
@@ -121,8 +132,12 @@ mod tests {
     use crate::sse::SseBroadcaster;
 
     fn test_state() -> AppState {
-        let plugin_manager = Arc::new(tokio::sync::RwLock::new(astrbot_plugin::PluginManager::new(std::path::PathBuf::from("plugins"))));
-        let provider_manager = Arc::new(tokio::sync::RwLock::new(astrbot_provider::client::ProviderManager::new()));
+        let plugin_manager = Arc::new(tokio::sync::RwLock::new(
+            astrbot_plugin::PluginManager::new(std::path::PathBuf::from("plugins")),
+        ));
+        let provider_manager = Arc::new(tokio::sync::RwLock::new(
+            astrbot_provider::client::ProviderManager::new(),
+        ));
         let mut state = AppState::new(plugin_manager, provider_manager);
         state.sse_broadcaster = Some(Arc::new(SseBroadcaster::new(10)));
         state
@@ -147,7 +162,11 @@ mod tests {
         let b = state.sse_broadcaster.as_ref().unwrap();
         let client = b.add_client().await;
         let mut rx = client.rx;
-        broadcast_config_update(&state, vec!["providers".to_string(), "nickname".to_string()]).await;
+        broadcast_config_update(
+            &state,
+            vec!["providers".to_string(), "nickname".to_string()],
+        )
+        .await;
         let received = rx.try_recv().expect("should receive event");
         assert!(matches!(received, DashboardEvent::ConfigUpdate { .. }));
     }
@@ -160,7 +179,10 @@ mod tests {
         let mut rx = client.rx;
         broadcast_provider_status(&state, "openai", "connected", None).await;
         let received = rx.try_recv().expect("should receive event");
-        assert!(matches!(received, DashboardEvent::ProviderStatusChange { .. }));
+        assert!(matches!(
+            received,
+            DashboardEvent::ProviderStatusChange { .. }
+        ));
     }
 
     #[tokio::test]
@@ -176,8 +198,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_broadcast_without_broadcaster_does_not_panic() {
-        let plugin_manager = Arc::new(tokio::sync::RwLock::new(astrbot_plugin::PluginManager::new(std::path::PathBuf::from("plugins"))));
-        let provider_manager = Arc::new(tokio::sync::RwLock::new(astrbot_provider::client::ProviderManager::new()));
+        let plugin_manager = Arc::new(tokio::sync::RwLock::new(
+            astrbot_plugin::PluginManager::new(std::path::PathBuf::from("plugins")),
+        ));
+        let provider_manager = Arc::new(tokio::sync::RwLock::new(
+            astrbot_provider::client::ProviderManager::new(),
+        ));
         let mut state = AppState::new(plugin_manager, provider_manager);
         state.sse_broadcaster = None;
         broadcast_config_update(&state, vec!["x".into()]).await;

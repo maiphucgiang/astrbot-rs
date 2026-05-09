@@ -16,7 +16,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
-use tracing::{info, warn, debug};
+use tracing::{debug, info, warn};
 
 use crate::errors::{AstrBotError, Result};
 use crate::message::{AstrBotMessage, MessageChain, MessageComponent, MessageType};
@@ -83,7 +83,7 @@ pub struct PipelineEvent {
     pub is_stopped: bool,
     pub is_wake: bool,
     pub is_at_or_wake_command: bool,
-    pub role: String, // "user" | "admin"
+    pub role: String,                    // "user" | "admin"
     pub activated_handlers: Vec<String>, // TODO: StarHandlerMetadata
     pub extras: HashMap<String, String>,
     pub result_chain: Option<MessageChain>,
@@ -156,11 +156,18 @@ impl StageRegistry {
     }
 
     pub fn register(&mut self, name: &'static str, stage: Box<dyn Stage>) {
-        let pos = self.order.iter().position(|&o| o == name).unwrap_or(usize::MAX);
+        let pos = self
+            .order
+            .iter()
+            .position(|&o| o == name)
+            .unwrap_or(usize::MAX);
         self.stages.push((name.to_string(), stage));
         // Sort by declared order
         self.stages.sort_by_key(|(name, _)| {
-            self.order.iter().position(|&o| o == name.as_str()).unwrap_or(usize::MAX)
+            self.order
+                .iter()
+                .position(|&o| o == name.as_str())
+                .unwrap_or(usize::MAX)
         });
     }
 
@@ -188,7 +195,11 @@ pub struct PipelineScheduler {
 
 impl PipelineScheduler {
     pub fn new(ctx: Arc<PipelineContext>, registry: StageRegistry) -> Self {
-        Self { ctx, registry, metrics_collector: None }
+        Self {
+            ctx,
+            registry,
+            metrics_collector: None,
+        }
     }
 
     pub fn with_metrics_collector(
@@ -487,7 +498,8 @@ impl Stage for RateLimitStage {
         match self.strategy {
             RateLimitStrategy::Stall => {
                 let next_window = *timestamps.front().unwrap() + self.rate_limit_time;
-                let stall_duration = next_window.saturating_duration_since(now) + Duration::from_millis(300);
+                let stall_duration =
+                    next_window.saturating_duration_since(now) + Duration::from_millis(300);
                 tracing::info!(
                     "Session {} rate limited, stalling for {:.2}s",
                     session_id,
@@ -599,9 +611,12 @@ impl Stage for PreProcessStage {
 
     async fn process(&self, event: &mut PipelineEvent) -> Result<StageFlow> {
         if self.enable_stt {
-            let has_voice = event.message.chain.components().iter().any(|c| {
-                matches!(c, MessageComponent::Voice { .. })
-            });
+            let has_voice = event
+                .message
+                .chain
+                .components()
+                .iter()
+                .any(|c| matches!(c, MessageComponent::Voice { .. }));
             if has_voice {
                 debug!("[PreProcess] Voice message detected, STT not yet implemented");
             }
@@ -760,7 +775,10 @@ mod tests {
         let mut registry = StageRegistry::new();
 
         registry.register("WakingCheckStage", Box::new(WakingCheckStage::default()));
-        registry.register("WhitelistCheckStage", Box::new(WhitelistCheckStage::default()));
+        registry.register(
+            "WhitelistCheckStage",
+            Box::new(WhitelistCheckStage::default()),
+        );
         registry.register("RateLimitStage", Box::new(RateLimitStage::default()));
         registry.register("ProcessStage", Box::new(ProcessStage::new()));
         registry.register("RespondStage", Box::new(RespondStage::new()));
@@ -839,12 +857,9 @@ mod tests {
         let ctx = Arc::new(PipelineContext::new());
         let mut registry = StageRegistry::new();
 
-        let engine = crate::safety::SafetyEngine::new()
-            .add_strategy(Box::new(crate::safety::KeywordFilter::new(
-                "keyword",
-                vec!["badword".to_string()],
-                false,
-            )));
+        let engine = crate::safety::SafetyEngine::new().add_strategy(Box::new(
+            crate::safety::KeywordFilter::new("keyword", vec!["badword".to_string()], false),
+        ));
         let safety = ContentSafetyCheckStage::with_engine(engine);
 
         registry.register("ContentSafetyCheckStage", Box::new(safety));
@@ -864,12 +879,9 @@ mod tests {
         let ctx = Arc::new(PipelineContext::new());
         let mut registry = StageRegistry::new();
 
-        let engine = crate::safety::SafetyEngine::new()
-            .add_strategy(Box::new(crate::safety::KeywordFilter::new(
-                "keyword",
-                vec!["badword".to_string()],
-                false,
-            )));
+        let engine = crate::safety::SafetyEngine::new().add_strategy(Box::new(
+            crate::safety::KeywordFilter::new("keyword", vec!["badword".to_string()], false),
+        ));
         let safety = ContentSafetyCheckStage::with_engine(engine);
 
         registry.register("ContentSafetyCheckStage", Box::new(safety));
@@ -881,7 +893,10 @@ mod tests {
         let mut event = PipelineEvent::new(message);
 
         scheduler.execute(&mut event).await.unwrap();
-        assert!(event.is_stopped(), "Content with blocked keyword should be stopped");
+        assert!(
+            event.is_stopped(),
+            "Content with blocked keyword should be stopped"
+        );
         assert!(
             event.get_extra("safety_violation").is_some(),
             "Violation reason should be recorded in extras"
@@ -893,14 +908,10 @@ mod tests {
         let ctx = Arc::new(PipelineContext::new());
         let mut registry = StageRegistry::new();
 
-        let engine = crate::safety::SafetyEngine::new()
-            .add_strategy(Box::new(crate::safety::KeywordFilter::new(
-                "keyword",
-                vec!["badword".to_string()],
-                false,
-            )));
-        let safety = ContentSafetyCheckStage::with_engine(engine)
-            .with_stop_on_violation(false);
+        let engine = crate::safety::SafetyEngine::new().add_strategy(Box::new(
+            crate::safety::KeywordFilter::new("keyword", vec!["badword".to_string()], false),
+        ));
+        let safety = ContentSafetyCheckStage::with_engine(engine).with_stop_on_violation(false);
 
         registry.register("ContentSafetyCheckStage", Box::new(safety));
         registry.initialize_all(&ctx).await.unwrap();

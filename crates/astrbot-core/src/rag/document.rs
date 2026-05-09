@@ -44,38 +44,61 @@ impl DocumentParser {
     pub fn parse_json(json_str: &str) -> Result<Document> {
         let val: Value = serde_json::from_str(json_str)
             .map_err(|e| AstrBotError::Serialization(format!("JSON parse error: {}", e)))?;
-        let title = val.get("title").and_then(|v| v.as_str()).unwrap_or("untitled").to_string();
-        let content = val.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let title = val
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("untitled")
+            .to_string();
+        let content = val
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         Ok(Document {
             id: uuid::Uuid::new_v4().to_string(),
-            title, content,
+            title,
+            content,
             metadata: Some(val),
         })
     }
 
     pub fn parse_pdf(bytes: &[u8], title: impl Into<String>) -> Result<Document> {
         let content = String::from_utf8_lossy(bytes);
-        let re = Regex::new(r"\(([^)\\]+)\)").map_err(|e| AstrBotError::Internal(format!("Regex error: {}", e)))?;
+        let re = Regex::new(r"\(([^)\\]+)\)")
+            .map_err(|e| AstrBotError::Internal(format!("Regex error: {}", e)))?;
         let mut extracted = Vec::new();
         for cap in re.captures_iter(&content) {
             if let Some(m) = cap.get(1) {
                 let text = m.as_str().trim();
-                if !text.is_empty() && text.len() > 1 { extracted.push(text.to_string()); }
+                if !text.is_empty() && text.len() > 1 {
+                    extracted.push(text.to_string());
+                }
             }
         }
         if extracted.is_empty() {
             return Err(AstrBotError::Internal("PDF text extraction failed: no text streams found. Consider adding a proper PDF parser like lopdf.".to_string()));
         }
-        let content = extracted.join("
-");
-        Ok(Document { id: uuid::Uuid::new_v4().to_string(), title: title.into(), content, metadata: Some(serde_json::json!({"format": "pdf"})) })
+        let content = extracted.join(
+            "
+",
+        );
+        Ok(Document {
+            id: uuid::Uuid::new_v4().to_string(),
+            title: title.into(),
+            content,
+            metadata: Some(serde_json::json!({"format": "pdf"})),
+        })
     }
 
     fn strip_markdown(md: &str) -> String {
         let mut text = md.to_string();
         let code_block = Regex::new(r"```[\s\S]*?```").unwrap();
-        text = code_block.replace_all(&text, "
-").to_string();
+        text = code_block
+            .replace_all(
+                &text, "
+",
+            )
+            .to_string();
         let inline_code = Regex::new(r"`([^`]+)`").unwrap();
         text = inline_code.replace_all(&text, "$1").to_string();
         let image = Regex::new(r"!\[([^\]]*)\]\([^\)]*\)").unwrap();
@@ -97,13 +120,15 @@ impl DocumentParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test] fn test_parse_text() {
+    #[test]
+    fn test_parse_text() {
         let doc = DocumentParser::parse_text("Hello world", "Test");
         assert_eq!(doc.title, "Test");
         assert_eq!(doc.content, "Hello world");
         assert!(doc.metadata.is_none());
     }
-    #[test] fn test_parse_markdown_strips_syntax() {
+    #[test]
+    fn test_parse_markdown_strips_syntax() {
         let md = r#"# Heading
 
 This is **bold** and *italic*.
@@ -128,12 +153,14 @@ let x = 1;
         assert!(doc.content.contains("An image"));
         assert!(doc.content.contains("A quote"));
     }
-    #[test] fn test_parse_json() {
+    #[test]
+    fn test_parse_json() {
         let doc = DocumentParser::parse_json(r#"{"title": "My Doc", "content": "Hello"}"#).unwrap();
         assert_eq!(doc.title, "My Doc");
         assert_eq!(doc.content, "Hello");
     }
-    #[test] fn test_parse_pdf_basic_extraction() {
+    #[test]
+    fn test_parse_pdf_basic_extraction() {
         let pdf_bytes = b"%PDF-1.4
 BT /F1 12 Tf 100 700 Td (Hello world) Tj ET
 %%EOF";
@@ -141,7 +168,8 @@ BT /F1 12 Tf 100 700 Td (Hello world) Tj ET
         assert_eq!(doc.title, "Test PDF");
         assert!(doc.content.contains("Hello world"));
     }
-    #[test] fn test_parse_pdf_no_text_fails() {
+    #[test]
+    fn test_parse_pdf_no_text_fails() {
         let pdf_bytes = b"%PDF-1.4
 1 0 obj
 << /Type /Catalog >>

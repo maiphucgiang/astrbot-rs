@@ -11,8 +11,10 @@ use crate::platform::PlatformType;
 
 /// 发送函数类型：异步发送消息到指定来源
 pub type SendFn = Arc<
-    dyn Fn(crate::platform::MessageSource, MessageChain)
-        -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>
+    dyn Fn(
+            crate::platform::MessageSource,
+            MessageChain,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>>
         + Send
         + Sync,
 >;
@@ -59,10 +61,7 @@ impl RespondStage {
     }
 
     /// 消息格式化：根据平台特性做转换
-    fn format_for_platform(&self,
-        chain: &MessageChain,
-        platform: PlatformType,
-    ) -> MessageChain {
+    fn format_for_platform(&self, chain: &MessageChain, platform: PlatformType) -> MessageChain {
         if !self.enable_markdown_formatting {
             return chain.clone();
         }
@@ -113,10 +112,7 @@ impl RespondStage {
             match result {
                 Ok(()) => {
                     if attempt > 0 {
-                        info!(
-                            "Message sent successfully after {} retries",
-                            attempt
-                        );
+                        info!("Message sent successfully after {} retries", attempt);
                     }
                     return Ok(());
                 }
@@ -137,13 +133,11 @@ impl RespondStage {
                             self.max_retries + 1,
                             e
                         );
-                        return Err(crate::errors::AstrBotError::Internal(
-                            format!(
-                                "Failed to send message after {} retries: {}",
-                                self.max_retries + 1,
-                                e
-                            ),
-                        ));
+                        return Err(crate::errors::AstrBotError::Internal(format!(
+                            "Failed to send message after {} retries: {}",
+                            self.max_retries + 1,
+                            e
+                        )));
                     }
                 }
             }
@@ -166,24 +160,16 @@ fn markdown_to_qq(text: &str) -> String {
 
 /// 简化 Markdown → WeChat 文本转换
 fn markdown_to_wechat(text: &str) -> String {
-    text.replace("**", "*")
-        .replace("`", "'")
-        .replace("```", "")
+    text.replace("**", "*").replace("`", "'").replace("```", "")
 }
 
 #[async_trait]
 impl Stage for RespondStage {
-    async fn initialize(
-        &mut self,
-        _ctx: &PipelineContext,
-    ) -> Result<()> {
+    async fn initialize(&mut self, _ctx: &PipelineContext) -> Result<()> {
         Ok(())
     }
 
-    async fn process(
-        &self,
-        event: &mut PipelineEvent,
-    ) -> Result<StageFlow> {
+    async fn process(&self, event: &mut PipelineEvent) -> Result<StageFlow> {
         // 1. 检查 result_chain
         let chain = match &event.result_chain {
             Some(chain) if !chain.components().is_empty() => chain.clone(),
@@ -195,15 +181,11 @@ impl Stage for RespondStage {
 
         info!(
             "[RespondStage] sending response to {} on {:?}",
-            event.message.sender.user_id,
-            event.message.platform
+            event.message.sender.user_id, event.message.platform
         );
 
         // 2. 格式化
-        let formatted = self.format_for_platform(
-            &chain,
-            event.message.platform,
-        );
+        let formatted = self.format_for_platform(&chain, event.message.platform);
 
         // 3. 发送（带重试）。失败不 panic，graceful degradation。
         let source = crate::platform::MessageSource {
@@ -326,18 +308,9 @@ mod tests {
     fn test_backoff_duration() {
         let stage = RespondStage::new().with_retry_policy(3, 500);
         assert_eq!(stage.backoff_duration(0), Duration::from_millis(500));
-        assert_eq!(
-            stage.backoff_duration(1),
-            Duration::from_millis(1000)
-        );
-        assert_eq!(
-            stage.backoff_duration(2),
-            Duration::from_millis(2000)
-        );
-        assert_eq!(
-            stage.backoff_duration(10),
-            Duration::from_millis(8000)
-        ); // capped
+        assert_eq!(stage.backoff_duration(1), Duration::from_millis(1000));
+        assert_eq!(stage.backoff_duration(2), Duration::from_millis(2000));
+        assert_eq!(stage.backoff_duration(10), Duration::from_millis(8000)); // capped
     }
 
     #[test]
@@ -349,9 +322,6 @@ mod tests {
     #[test]
     fn test_markdown_to_wechat() {
         let input = "**bold** and `code`";
-        assert_eq!(
-            markdown_to_wechat(input),
-            "*bold* and 'code'"
-        );
+        assert_eq!(markdown_to_wechat(input), "*bold* and 'code'");
     }
 }

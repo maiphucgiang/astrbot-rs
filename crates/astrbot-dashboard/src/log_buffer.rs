@@ -1,8 +1,8 @@
 use std::collections::VecDeque;
 use std::sync::Mutex;
 use tracing::{Event, Subscriber};
-use tracing_subscriber::layer::{Context, Layer};
 use tracing_subscriber::fmt::format::Writer;
+use tracing_subscriber::layer::{Context, Layer};
 
 /// A single log entry
 #[derive(Clone, Debug, serde::Serialize)]
@@ -75,7 +75,9 @@ where
         let metadata = event.metadata();
         let level = metadata.level().to_string();
         let target = metadata.target().to_string();
-        let timestamp = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f%:z").to_string();
+        let timestamp = chrono::Local::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3f%:z")
+            .to_string();
 
         let mut visitor = MessageVisitor::default();
         event.record(&mut visitor);
@@ -107,7 +109,8 @@ impl tracing::field::Visit for MessageVisitor {
             if !self.message.is_empty() {
                 self.message.push_str(" ");
             }
-            self.message.push_str(&format!("{}={}", field.name(), val_clean));
+            self.message
+                .push_str(&format!("{}={}", field.name(), val_clean));
         }
     }
 
@@ -118,7 +121,8 @@ impl tracing::field::Visit for MessageVisitor {
             if !self.message.is_empty() {
                 self.message.push_str(" ");
             }
-            self.message.push_str(&format!("{}={}", field.name(), value));
+            self.message
+                .push_str(&format!("{}={}", field.name(), value));
         }
     }
 
@@ -126,28 +130,32 @@ impl tracing::field::Visit for MessageVisitor {
         if !self.message.is_empty() {
             self.message.push_str(" ");
         }
-        self.message.push_str(&format!("{}={}", field.name(), value));
+        self.message
+            .push_str(&format!("{}={}", field.name(), value));
     }
 
     fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
         if !self.message.is_empty() {
             self.message.push_str(" ");
         }
-        self.message.push_str(&format!("{}={}", field.name(), value));
+        self.message
+            .push_str(&format!("{}={}", field.name(), value));
     }
 
     fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
         if !self.message.is_empty() {
             self.message.push_str(" ");
         }
-        self.message.push_str(&format!("{}={}", field.name(), value));
+        self.message
+            .push_str(&format!("{}={}", field.name(), value));
     }
 
     fn record_f64(&mut self, field: &tracing::field::Field, value: f64) {
         if !self.message.is_empty() {
             self.message.push_str(" ");
         }
-        self.message.push_str(&format!("{}={}", field.name(), value));
+        self.message
+            .push_str(&format!("{}={}", field.name(), value));
     }
 }
 

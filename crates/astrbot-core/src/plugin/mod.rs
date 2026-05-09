@@ -212,5 +212,8 @@ pub trait PluginDispatcher: Send + Sync {
         &self,
         message: &crate::message::AstrBotMessage,
         source: &crate::platform::MessageSource,
-    ) -> Vec<(String, crate::errors::Result<crate::message::MessageEventResult>)>;
+    ) -> Vec<(
+        String,
+        crate::errors::Result<crate::message::MessageEventResult>,
+    )>;
 }

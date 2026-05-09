@@ -1,8 +1,8 @@
+use astrbot_core::message::{AstrBotMessage, MessageChain, MessageMember, MessageType};
 use astrbot_core::pipeline::{
     PipelineContext, PipelineEvent, PipelineScheduler, Stage, StageFlow, StageRegistry,
     WakingCheckStage,
 };
-use astrbot_core::message::{AstrBotMessage, MessageChain, MessageMember, MessageType};
 use astrbot_core::platform::PlatformType;
 use astrbot_core::provider::{ChatConfig, ChatMessage, Provider};
 use astrbot_core::testing::MockProvider;
@@ -21,10 +21,7 @@ impl Stage for E2eProcessStage {
         Ok(())
     }
 
-    async fn process(
-        &self,
-        event: &mut PipelineEvent,
-    ) -> astrbot_core::errors::Result<StageFlow> {
+    async fn process(&self, event: &mut PipelineEvent) -> astrbot_core::errors::Result<StageFlow> {
         let user_text = event.message.chain.plain_text();
         let messages = vec![ChatMessage::user(user_text)];
         let config = ChatConfig {
@@ -52,10 +49,7 @@ impl Stage for E2eRespondStage {
         Ok(())
     }
 
-    async fn process(
-        &self,
-        event: &mut PipelineEvent,
-    ) -> astrbot_core::errors::Result<StageFlow> {
+    async fn process(&self, event: &mut PipelineEvent) -> astrbot_core::errors::Result<StageFlow> {
         if let Some(ref chain) = event.result_chain {
             self.outputs.lock().unwrap().push(chain.clone());
         }
@@ -76,9 +70,12 @@ async fn test_e2e_basic_chat() {
     let mut registry = StageRegistry::new();
     registry.register("WakingCheckStage", Box::new(WakingCheckStage::default()));
     registry.register("ProcessStage", Box::new(E2eProcessStage { provider }));
-    registry.register("RespondStage", Box::new(E2eRespondStage {
-        outputs: outputs.clone(),
-    }));
+    registry.register(
+        "RespondStage",
+        Box::new(E2eRespondStage {
+            outputs: outputs.clone(),
+        }),
+    );
 
     registry.initialize_all(&ctx).await.unwrap();
     let scheduler = PipelineScheduler::new(ctx, registry);
@@ -119,9 +116,12 @@ async fn test_e2e_with_plugin_intercept() {
     let mut registry = StageRegistry::new();
     registry.register("WakingCheckStage", Box::new(WakingCheckStage::default()));
     registry.register("ProcessStage", Box::new(E2eProcessStage { provider }));
-    registry.register("RespondStage", Box::new(E2eRespondStage {
-        outputs: outputs.clone(),
-    }));
+    registry.register(
+        "RespondStage",
+        Box::new(E2eRespondStage {
+            outputs: outputs.clone(),
+        }),
+    );
 
     registry.initialize_all(&ctx).await.unwrap();
     let scheduler = PipelineScheduler::new(ctx, registry);
@@ -160,9 +160,12 @@ async fn test_e2e_empty_message() {
     let mut registry = StageRegistry::new();
     registry.register("WakingCheckStage", Box::new(WakingCheckStage::default()));
     registry.register("ProcessStage", Box::new(E2eProcessStage { provider }));
-    registry.register("RespondStage", Box::new(E2eRespondStage {
-        outputs: outputs.clone(),
-    }));
+    registry.register(
+        "RespondStage",
+        Box::new(E2eRespondStage {
+            outputs: outputs.clone(),
+        }),
+    );
 
     registry.initialize_all(&ctx).await.unwrap();
     let scheduler = PipelineScheduler::new(ctx, registry);
@@ -201,9 +204,12 @@ async fn test_e2e_group_message() {
     let mut registry = StageRegistry::new();
     registry.register("WakingCheckStage", Box::new(WakingCheckStage::default()));
     registry.register("ProcessStage", Box::new(E2eProcessStage { provider }));
-    registry.register("RespondStage", Box::new(E2eRespondStage {
-        outputs: outputs.clone(),
-    }));
+    registry.register(
+        "RespondStage",
+        Box::new(E2eRespondStage {
+            outputs: outputs.clone(),
+        }),
+    );
 
     registry.initialize_all(&ctx).await.unwrap();
     let scheduler = PipelineScheduler::new(ctx, registry);

@@ -95,7 +95,12 @@ impl SseBroadcaster {
         let _ = self.tx.send(event);
     }
 
-    pub fn broadcast_provider_status(&self, provider_id: impl Into<String>, status: impl Into<String>, error: Option<String>) {
+    pub fn broadcast_provider_status(
+        &self,
+        provider_id: impl Into<String>,
+        status: impl Into<String>,
+        error: Option<String>,
+    ) {
         self.broadcast_event(DashboardEvent::ProviderStatusChange {
             provider_id: provider_id.into(),
             status: status.into(),
@@ -103,7 +108,12 @@ impl SseBroadcaster {
         });
     }
 
-    pub fn broadcast_plugin_install(&self, plugin_id: impl Into<String>, action: impl Into<String>, success: bool) {
+    pub fn broadcast_plugin_install(
+        &self,
+        plugin_id: impl Into<String>,
+        action: impl Into<String>,
+        success: bool,
+    ) {
         self.broadcast_event(DashboardEvent::PluginInstall {
             plugin_id: plugin_id.into(),
             action: action.into(),
@@ -239,7 +249,11 @@ mod tests {
         broadcaster.broadcast_plugin_install("weather", "install", true);
         let received = rx.try_recv().expect("should receive");
         match received {
-            DashboardEvent::PluginInstall { plugin_id, action, success } => {
+            DashboardEvent::PluginInstall {
+                plugin_id,
+                action,
+                success,
+            } => {
                 assert_eq!(plugin_id, "weather");
                 assert_eq!(action, "install");
                 assert!(success);
@@ -259,7 +273,10 @@ mod tests {
         );
         let received = rx.try_recv().expect("should receive");
         match received {
-            DashboardEvent::ConfigUpdate { updated_keys, source } => {
+            DashboardEvent::ConfigUpdate {
+                updated_keys,
+                source,
+            } => {
                 assert_eq!(updated_keys, vec!["providers", "plugins"]);
                 assert_eq!(source, Some("dashboard".to_string()));
             }

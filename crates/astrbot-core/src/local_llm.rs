@@ -34,7 +34,8 @@ impl OllamaClient {
     }
 
     /// Single-turn chat (non-streaming).
-    pub async fn chat(&self,
+    pub async fn chat(
+        &self,
         messages: Vec<ChatMessage>,
         temperature: Option<f32>,
     ) -> Result<String> {
@@ -49,7 +50,12 @@ impl OllamaClient {
         if let Some(t) = temperature {
             body["options"] = json!({ "temperature": t });
         }
-        let resp = self.client.post(&url).json(&body).send().await
+        let resp = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
             .map_err(|e| AstrBotError::Network(format!("Ollama chat request: {}", e)))?;
         let status = resp.status();
         if !status.is_success() {
@@ -59,7 +65,9 @@ impl OllamaClient {
                 status, text
             )));
         }
-        let json: serde_json::Value = resp.json().await
+        let json: serde_json::Value = resp
+            .json()
+            .await
             .map_err(|e| AstrBotError::Serialization(format!("Ollama JSON parse: {}", e)))?;
         let content = json["message"]["content"]
             .as_str()
@@ -102,7 +110,9 @@ impl OllamaClient {
             .send()
             .await
             .map_err(|e| AstrBotError::Network(format!("Ollama list models: {}", e)))?;
-        let json: serde_json::Value = resp.json().await
+        let json: serde_json::Value = resp
+            .json()
+            .await
             .map_err(|e| AstrBotError::Serialization(format!("Ollama list models JSON: {}", e)))?;
         let models = json["models"]
             .as_array()
@@ -147,8 +157,12 @@ mod tests {
         let server = tokio::spawn(run_mock_ollama_server(port, body.to_string()));
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
-        let client = OllamaClient::new(format!("http://127.0.0.1:{}", port), "llama3.2".to_string());
-        let messages = vec![ChatMessage { role: "user".into(), content: "Say hi".into() }];
+        let client =
+            OllamaClient::new(format!("http://127.0.0.1:{}", port), "llama3.2".to_string());
+        let messages = vec![ChatMessage {
+            role: "user".into(),
+            content: "Say hi".into(),
+        }];
         let result = client.chat(messages, None).await.unwrap();
         assert_eq!(result, "Hello!");
         let _ = server.await;
@@ -178,7 +192,10 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         let client = OllamaClient::new(format!("http://127.0.0.1:{}", port), "qwen2.5".to_string());
-        let messages = vec![ChatMessage { role: "user".into(), content: "hi".into() }];
+        let messages = vec![ChatMessage {
+            role: "user".into(),
+            content: "hi".into(),
+        }];
         let result = client.chat(messages, Some(0.5)).await.unwrap();
         assert_eq!(result, "Yo");
         let _ = server.await;
@@ -191,7 +208,8 @@ mod tests {
         let server = tokio::spawn(run_mock_ollama_server(port, body.to_string()));
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
-        let client = OllamaClient::new(format!("http://127.0.0.1:{}", port), "llama3.2".to_string());
+        let client =
+            OllamaClient::new(format!("http://127.0.0.1:{}", port), "llama3.2".to_string());
         assert!(client.health_check().await.is_ok());
         let _ = server.await;
     }
@@ -203,7 +221,8 @@ mod tests {
         let server = tokio::spawn(run_mock_ollama_server(port, body.to_string()));
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
-        let client = OllamaClient::new(format!("http://127.0.0.1:{}", port), "llama3.2".to_string());
+        let client =
+            OllamaClient::new(format!("http://127.0.0.1:{}", port), "llama3.2".to_string());
         let models = client.list_models().await.unwrap();
         assert_eq!(models, vec!["llama3.2".to_string(), "qwen2.5".to_string()]);
         let _ = server.await;
@@ -222,8 +241,19 @@ mod tests {
         });
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
-        let client = OllamaClient::new(format!("http://127.0.0.1:{}", port), "bad-model".to_string());
-        let result = client.chat(vec![ChatMessage { role: "user".into(), content: "test".into() }], None).await;
+        let client = OllamaClient::new(
+            format!("http://127.0.0.1:{}", port),
+            "bad-model".to_string(),
+        );
+        let result = client
+            .chat(
+                vec![ChatMessage {
+                    role: "user".into(),
+                    content: "test".into(),
+                }],
+                None,
+            )
+            .await;
         assert!(result.is_err());
         let _ = server.await;
     }

@@ -29,16 +29,14 @@ impl KbSearchTool {
             definition: ToolDefinition {
                 name: "kb_search".to_string(),
                 description: "Search the knowledge base for relevant document chunks".to_string(),
-                parameters: vec![
-                    ToolParameter {
-                        name: "query".to_string(),
-                        description: "Search query text".to_string(),
-                        param_type: "string".to_string(),
-                        required: true,
-                        default: None,
-                        enum_values: None,
-                    },
-                ],
+                parameters: vec![ToolParameter {
+                    name: "query".to_string(),
+                    description: "Search query text".to_string(),
+                    param_type: "string".to_string(),
+                    required: true,
+                    default: None,
+                    enum_values: None,
+                }],
                 returns: Some("array".to_string()),
                 requires_confirmation: false,
             },
@@ -181,7 +179,10 @@ impl Tool for KbIndexTool {
             metadata: None,
         };
 
-        let splitter = TextSplitter::new(SplitStrategy::FixedSize { chunk_size, overlap });
+        let splitter = TextSplitter::new(SplitStrategy::FixedSize {
+            chunk_size,
+            overlap,
+        });
         let chunks = splitter.split(&doc);
         let chunk_ids: Vec<String> = chunks.iter().map(|c| c.id.clone()).collect();
 
@@ -229,9 +230,7 @@ impl Tool for KbListTool {
     async fn execute(&self, _arguments: &Value) -> Result<ToolResult> {
         let collections = self.store.list_collections().await?;
         Ok(ToolResult::Success {
-            output: Value::Array(
-                collections.into_iter().map(|c| Value::String(c)).collect(),
-            ),
+            output: Value::Array(collections.into_iter().map(|c| Value::String(c)).collect()),
         })
     }
 }
@@ -255,17 +254,16 @@ impl KbDeleteTool {
         Self {
             definition: ToolDefinition {
                 name: "kb_delete".to_string(),
-                description: "Delete a document and all its chunks from the knowledge base".to_string(),
-                parameters: vec![
-                    ToolParameter {
-                        name: "doc_id".to_string(),
-                        description: "Document ID to delete".to_string(),
-                        param_type: "string".to_string(),
-                        required: true,
-                        default: None,
-                        enum_values: None,
-                    },
-                ],
+                description: "Delete a document and all its chunks from the knowledge base"
+                    .to_string(),
+                parameters: vec![ToolParameter {
+                    name: "doc_id".to_string(),
+                    description: "Document ID to delete".to_string(),
+                    param_type: "string".to_string(),
+                    required: true,
+                    default: None,
+                    enum_values: None,
+                }],
                 returns: Some("object".to_string()),
                 requires_confirmation: true,
             },
@@ -311,7 +309,7 @@ impl Tool for KbDeleteTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rag::embedding::{EmbeddingProvider, EmbeddingConfig};
+    use crate::rag::embedding::{EmbeddingConfig, EmbeddingProvider};
     use crate::rag::rerank::{RerankProvider, RerankResult};
     use crate::vector_store::MemoryVectorStore;
     use async_trait::async_trait;
@@ -320,18 +318,35 @@ mod tests {
     struct MockEmbeddingProvider;
     #[async_trait]
     impl EmbeddingProvider for MockEmbeddingProvider {
-        fn id(&self) -> &str { "mock-emb" }
-        fn name(&self) -> &str { "Mock Embedding" }
-        async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
-            Ok(texts.into_iter().map(|t| {
-                let hash = t.bytes().fold(0u32, |acc, b| acc.wrapping_add(b as u32));
-                let mut vec = vec![0.0f32; 8]; vec[(hash % 8) as usize] = 1.0; vec
-            }).collect())
+        fn id(&self) -> &str {
+            "mock-emb"
         }
-        async fn health_check(&self) -> Result<bool> { Ok(true) }
+        fn name(&self) -> &str {
+            "Mock Embedding"
+        }
+        async fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
+            Ok(texts
+                .into_iter()
+                .map(|t| {
+                    let hash = t.bytes().fold(0u32, |acc, b| acc.wrapping_add(b as u32));
+                    let mut vec = vec![0.0f32; 8];
+                    vec[(hash % 8) as usize] = 1.0;
+                    vec
+                })
+                .collect())
+        }
+        async fn health_check(&self) -> Result<bool> {
+            Ok(true)
+        }
     }
 
-    fn test_retriever(collection: &str) -> (Arc<dyn EmbeddingProvider>, Arc<dyn VectorStore>, Arc<Retriever>) {
+    fn test_retriever(
+        collection: &str,
+    ) -> (
+        Arc<dyn EmbeddingProvider>,
+        Arc<dyn VectorStore>,
+        Arc<Retriever>,
+    ) {
         let embedding: Arc<dyn EmbeddingProvider> = Arc::new(MockEmbeddingProvider);
         let store: Arc<dyn VectorStore> = Arc::new(MemoryVectorStore::new());
         let retriever = Arc::new(Retriever::new(
@@ -450,7 +465,10 @@ mod tests {
             .unwrap();
         match r {
             ToolResult::Success { output } => {
-                assert_eq!(output.get("chunks_removed").and_then(|v| v.as_u64()), Some(1));
+                assert_eq!(
+                    output.get("chunks_removed").and_then(|v| v.as_u64()),
+                    Some(1)
+                );
             }
             _ => panic!("Expected success"),
         }

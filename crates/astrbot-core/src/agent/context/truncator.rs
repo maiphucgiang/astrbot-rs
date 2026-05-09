@@ -73,7 +73,10 @@ mod tests {
         ];
         let out = truncator.truncate(&history);
         assert!(!out.is_empty());
-        assert_ne!(out.first().map(|m| m.content.as_str()), Some("first message here"));
+        assert_ne!(
+            out.first().map(|m| m.content.as_str()),
+            Some("first message here")
+        );
     }
 
     #[test]

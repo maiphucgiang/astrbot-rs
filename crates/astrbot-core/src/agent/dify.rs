@@ -10,10 +10,10 @@
 //!
 //! 会话 KV：conversation_id 缓存在内存 SessionStore 中。
 
-use async_trait::async_trait;
+use super::{AgentConfig, AgentContext, AgentExecutor, AgentResult};
 use crate::errors::{AstrBotError, Result};
 use crate::message::{MessageChain, MessageComponent};
-use super::{AgentContext, AgentResult, AgentExecutor, AgentConfig};
+use async_trait::async_trait;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -159,9 +159,13 @@ impl DifyApiClient {
 
                     if event_text.starts_with("data:") {
                         let json_str = &event_text[5..];
-                        let event: Result<DifySseEvent> =
-                            serde_json::from_str(json_str.trim())
-                                .map_err(|e| AstrBotError::Serialization(format!("Dify SSE JSON parse error: {}", e)));
+                        let event: Result<DifySseEvent> = serde_json::from_str(json_str.trim())
+                            .map_err(|e| {
+                                AstrBotError::Serialization(format!(
+                                    "Dify SSE JSON parse error: {}",
+                                    e
+                                ))
+                            });
                         return Some((event, (stream, buf)));
                     }
                     // Ignore "event: ..." or empty lines, keep looping.
@@ -174,7 +178,10 @@ impl DifyApiClient {
                         buf.push_str(&String::from_utf8_lossy(&chunk));
                     }
                     Some(Err(e)) => {
-                        let err = Err(AstrBotError::Network(format!("Dify SSE stream error: {}", e)));
+                        let err = Err(AstrBotError::Network(format!(
+                            "Dify SSE stream error: {}",
+                            e
+                        )));
                         return Some((err, (stream, buf)));
                     }
                     None => {
@@ -182,9 +189,13 @@ impl DifyApiClient {
                         let trimmed = buf.trim_start();
                         if trimmed.starts_with("data:") && !trimmed.trim().is_empty() {
                             let json_str = &trimmed[5..];
-                            let event: Result<DifySseEvent> =
-                                serde_json::from_str(json_str.trim())
-                                    .map_err(|e| AstrBotError::Serialization(format!("Dify SSE JSON parse error: {}", e)));
+                            let event: Result<DifySseEvent> = serde_json::from_str(json_str.trim())
+                                .map_err(|e| {
+                                    AstrBotError::Serialization(format!(
+                                        "Dify SSE JSON parse error: {}",
+                                        e
+                                    ))
+                                });
                             return Some((event, (stream, String::new())));
                         }
                         return None;
@@ -209,7 +220,9 @@ impl DifyApiClient {
             .timeout(std::time::Duration::from_secs(timeout_secs))
             .send()
             .await
-            .map_err(|e| AstrBotError::Network(format!("Dify chat-messages request failed: {}", e)))?;
+            .map_err(|e| {
+                AstrBotError::Network(format!("Dify chat-messages request failed: {}", e))
+            })?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -238,7 +251,9 @@ impl DifyApiClient {
             .timeout(std::time::Duration::from_secs(timeout_secs))
             .send()
             .await
-            .map_err(|e| AstrBotError::Network(format!("Dify workflow-run request failed: {}", e)))?;
+            .map_err(|e| {
+                AstrBotError::Network(format!("Dify workflow-run request failed: {}", e))
+            })?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -287,7 +302,9 @@ impl DifyApiClient {
             .multipart(form)
             .send()
             .await
-            .map_err(|e| AstrBotError::Network(format!("Dify file upload request failed: {}", e)))?;
+            .map_err(|e| {
+                AstrBotError::Network(format!("Dify file upload request failed: {}", e))
+            })?;
 
         let status = resp.status();
         let body = resp.json::<Value>().await.map_err(|e| {
@@ -414,11 +431,7 @@ impl DifyAgentRunner {
     }
 
     /// Build file list from base64 image URLs (upload them to Dify first).
-    async fn build_files(
-        &self,
-        image_urls: &[String],
-        user: &str,
-    ) -> Result<Vec<DifyFile>> {
+    async fn build_files(&self, image_urls: &[String], user: &str) -> Result<Vec<DifyFile>> {
         let mut files = Vec::new();
         for url in image_urls {
             // Assume base64 data URI: data:image/png;base64,xxx
@@ -447,7 +460,11 @@ impl DifyAgentRunner {
     }
 
     /// Merge static variables + session variables + system_prompt.
-    async fn build_payload_vars(&self, session_id: &str, system_prompt: Option<&str>) -> HashMap<String, Value> {
+    async fn build_payload_vars(
+        &self,
+        session_id: &str,
+        system_prompt: Option<&str>,
+    ) -> HashMap<String, Value> {
         let mut vars = self.variables.clone();
         if let Some(sp) = system_prompt {
             vars.insert("system_prompt".to_string(), json!(sp));
@@ -478,9 +495,7 @@ impl DifyAgentRunner {
             });
         }
 
-        let vars = self
-            .build_payload_vars(&ctx.session_id, None)
-            .await;
+        let vars = self.build_payload_vars(&ctx.session_id, None).await;
 
         let req = DifyChatRequest {
             inputs: vars,
@@ -515,7 +530,9 @@ impl DifyAgentRunner {
                     break;
                 }
                 "error" => {
-                    let msg = event.error.unwrap_or_else(|| "Unknown Dify error".to_string());
+                    let msg = event
+                        .error
+                        .unwrap_or_else(|| "Unknown Dify error".to_string());
                     return Err(AstrBotError::Provider {
                         provider: "dify".to_string(),
                         message: format!("Dify error: {}", msg),
@@ -534,9 +551,7 @@ impl DifyAgentRunner {
 
         // Persist conversation_id
         if let Some(cid) = new_conversation_id {
-            self.session_store
-                .set(&ctx.user_id, &cid)
-                .await;
+            self.session_store.set(&ctx.user_id, &cid).await;
         }
 
         if result_text.is_empty() {
@@ -561,11 +576,12 @@ impl DifyAgentRunner {
             .unwrap_or("")
             .to_string();
 
-        let mut inputs = self
-            .build_payload_vars(&ctx.session_id, None)
-            .await;
+        let mut inputs = self.build_payload_vars(&ctx.session_id, None).await;
         inputs.insert(self.query_input_key.clone(), json!(prompt));
-        inputs.insert("astrbot_session_id".to_string(), json!(ctx.session_id.clone()));
+        inputs.insert(
+            "astrbot_session_id".to_string(),
+            json!(ctx.session_id.clone()),
+        );
 
         let req = DifyWorkflowRequest {
             inputs,
@@ -626,7 +642,9 @@ impl DifyAgentRunner {
                     break;
                 }
                 "error" => {
-                    let msg = event.error.unwrap_or_else(|| "Unknown Dify error".to_string());
+                    let msg = event
+                        .error
+                        .unwrap_or_else(|| "Unknown Dify error".to_string());
                     return Err(AstrBotError::Provider {
                         provider: "dify".to_string(),
                         message: format!("Dify workflow error: {}", msg),
@@ -646,8 +664,7 @@ impl DifyAgentRunner {
         };
 
         // For workflow, we return the chain content as text.
-        let content = chain
-            .plain_text();
+        let content = chain.plain_text();
 
         Ok(AgentResult::Text { content })
     }
@@ -671,8 +688,7 @@ impl DifyAgentRunner {
                 // Check if this is an Array[File] from Dify HTTP request node
                 for item in arr {
                     if let Some(obj) = item.as_object() {
-                        if obj.get("dify_model_identity")
-                            .and_then(|v| v.as_str())
+                        if obj.get("dify_model_identity").and_then(|v| v.as_str())
                             == Some("__dify__file__")
                         {
                             // File array — parse each file
@@ -701,7 +717,10 @@ impl DifyAgentRunner {
                                         });
                                     }
                                     _ => {
-                                        let name = obj.get("filename").and_then(|v| v.as_str()).unwrap_or("file");
+                                        let name = obj
+                                            .get("filename")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("file");
                                         chain.0.push(MessageComponent::File {
                                             name: name.to_string(),
                                             url: Some(url.to_string()),
@@ -806,7 +825,11 @@ impl AgentExecutor for DifyAgentRunner {
             .extras
             .get("image_urls")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
 
         let files = if !image_urls.is_empty() {
@@ -820,9 +843,7 @@ impl AgentExecutor for DifyAgentRunner {
                 let conversation_id = self.session_store.get(&ctx.user_id).await;
                 self.run_chat_mode(ctx, conversation_id, files).await
             }
-            DifyApiType::Workflow => {
-                self.run_workflow_mode(ctx, files).await
-            }
+            DifyApiType::Workflow => self.run_workflow_mode(ctx, files).await,
         }
     }
 
@@ -885,8 +906,14 @@ mod tests {
     fn test_dify_api_type_from_str() {
         assert_eq!(DifyApiType::from_str("chat").unwrap(), DifyApiType::Chat);
         assert_eq!(DifyApiType::from_str("agent").unwrap(), DifyApiType::Agent);
-        assert_eq!(DifyApiType::from_str("chatflow").unwrap(), DifyApiType::Chatflow);
-        assert_eq!(DifyApiType::from_str("workflow").unwrap(), DifyApiType::Workflow);
+        assert_eq!(
+            DifyApiType::from_str("chatflow").unwrap(),
+            DifyApiType::Chatflow
+        );
+        assert_eq!(
+            DifyApiType::from_str("workflow").unwrap(),
+            DifyApiType::Workflow
+        );
         assert!(DifyApiType::from_str("unknown").is_err());
     }
 
@@ -921,7 +948,10 @@ mod tests {
         let config = test_config("chat");
         let runner = DifyAgentRunner::new(&config).unwrap();
         runner.session_store.set("user_1", "conv_abc").await;
-        assert_eq!(runner.session_store.get("user_1").await, Some("conv_abc".to_string()));
+        assert_eq!(
+            runner.session_store.get("user_1").await,
+            Some("conv_abc".to_string())
+        );
     }
 
     #[tokio::test]
@@ -959,7 +989,9 @@ mod tests {
         let chain = runner.parse_workflow_output(&data).await.unwrap();
         assert_eq!(chain.0.len(), 1);
         match &chain.0[0] {
-            MessageComponent::Image { url, .. } => assert_eq!(*url, Some("https://example.com/img.png".to_string())),
+            MessageComponent::Image { url, .. } => {
+                assert_eq!(*url, Some("https://example.com/img.png".to_string()))
+            }
             _ => panic!("Expected Image component"),
         }
     }

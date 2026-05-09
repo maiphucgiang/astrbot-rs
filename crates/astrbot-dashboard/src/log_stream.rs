@@ -63,9 +63,7 @@ impl Stream for LogStream {
         }
 
         match Pin::new(&mut self.heartbeat).poll_tick(cx) {
-            Poll::Ready(_) => {
-                Poll::Ready(Some(Ok(Event::default().comment("heartbeat"))))
-            }
+            Poll::Ready(_) => Poll::Ready(Some(Ok(Event::default().comment("heartbeat")))),
             Poll::Pending => Poll::Pending,
         }
     }

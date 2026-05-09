@@ -411,5 +411,5 @@ mod tests {
     }
 }
 
-pub mod tools;
 pub mod booter;
+pub mod tools;

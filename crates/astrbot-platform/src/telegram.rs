@@ -687,11 +687,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_telegram_adapter_new() {
-        let adapter = TelegramAdapter::new(
-            "test_token".to_string(),
-            None,
-            None,
-        );
+        let adapter = TelegramAdapter::new("test_token".to_string(), None, None);
         assert_eq!(adapter.metadata.name, "Telegram");
         assert!(adapter.metadata.enabled);
         assert_eq!(adapter.metadata.platform_type, PlatformType::Telegram);
@@ -751,13 +747,11 @@ mod tests {
             voice: None,
             document: None,
             reply_to_message: None,
-            entities: vec![
-                TelegramMessageEntity {
-                    entity_type: "mention".to_string(),
-                    offset: 6,
-                    length: 4,
-                },
-            ],
+            entities: vec![TelegramMessageEntity {
+                entity_type: "mention".to_string(),
+                offset: 6,
+                length: 4,
+            }],
         };
 
         let astr_msg = parse_telegram_message(&tg_msg);
@@ -766,14 +760,14 @@ mod tests {
         assert_eq!(astr_msg.sender.nickname, Some("Bob".to_string()));
 
         let components = astr_msg.chain.components();
-        assert!(components.iter().any(|c| matches!(c, MessageComponent::At { target, .. } if target == "bot")));
+        assert!(components
+            .iter()
+            .any(|c| matches!(c, MessageComponent::At { target, .. } if target == "bot")));
     }
 
     #[test]
     fn test_chain_to_text() {
-        let chain = MessageChain::new()
-            .text("Hello ")
-            .at("user123");
+        let chain = MessageChain::new().text("Hello ").at("user123");
         let (text, photo) = chain_to_telegram_text(&chain);
         assert_eq!(text, "Hello @user123");
         assert!(photo.is_none());

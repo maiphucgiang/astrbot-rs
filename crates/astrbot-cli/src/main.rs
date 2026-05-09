@@ -83,14 +83,11 @@ async fn main() -> anyhow::Result<()> {
     let capture_layer = astrbot_dashboard::log_buffer::LogCaptureLayer::new(log_buffer.clone());
 
     tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_writer(std::io::stdout)
-        )
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stdout))
         .with(
             tracing_subscriber::EnvFilter::from_default_env()
                 .add_directive("astrbot=info".parse()?)
-                .add_directive("warn".parse()?)
+                .add_directive("warn".parse()?),
         )
         .with(capture_layer)
         .init();
@@ -119,16 +116,27 @@ async fn cmd_init(dir: &str, minimal: bool) -> anyhow::Result<()> {
         warn!("config.json already exists at {:?}", config_path);
         println!("⚠️ config.json already exists — skipping generation");
     } else {
-        let cfg = if minimal { minimal_config() } else { default_config() };
+        let cfg = if minimal {
+            minimal_config()
+        } else {
+            default_config()
+        };
         let json = serde_json::to_string_pretty(&cfg)?;
         tokio::fs::write(&config_path, json).await?;
         info!("Generated config.json at {:?}", config_path);
     }
     let env_path = base.join(".env");
     if !env_path.exists() {
-        tokio::fs::write(&env_path, "# AstrBot Environment Variables\n# OPENAI_API_KEY=sk-...\n# TELEGRAM_BOT_TOKEN=...\n").await?;
+        tokio::fs::write(
+            &env_path,
+            "# AstrBot Environment Variables\n# OPENAI_API_KEY=sk-...\n# TELEGRAM_BOT_TOKEN=...\n",
+        )
+        .await?;
     }
-    println!("✅ AstrBot workspace initialized at {}", base.canonicalize()?.display());
+    println!(
+        "✅ AstrBot workspace initialized at {}",
+        base.canonicalize()?.display()
+    );
     println!(" Config: {}", config_path.display());
     println!(" Directories: data/ plugins/ logs/ tmp/");
     Ok(())
@@ -152,7 +160,11 @@ fn minimal_config() -> serde_json::Value {
     })
 }
 
-async fn cmd_run(config_path: String, daemon: bool, log_buffer: Arc<astrbot_dashboard::log_buffer::LogBuffer>) -> anyhow::Result<()> {
+async fn cmd_run(
+    config_path: String,
+    daemon: bool,
+    log_buffer: Arc<astrbot_dashboard::log_buffer::LogBuffer>,
+) -> anyhow::Result<()> {
     info!("Starting AstrBot server...");
     info!("Config file: {}", config_path);
     if daemon {
@@ -160,33 +172,56 @@ async fn cmd_run(config_path: String, daemon: bool, log_buffer: Arc<astrbot_dash
     }
     let mut runtime = crate::runtime::BotRuntime::new(std::path::PathBuf::from("plugins"));
     let cfg = match astrbot_core::config::AstrBotConfig::from_file(&config_path).await {
-        Ok(c) => { info!("Loaded config from {}", config_path); c }
+        Ok(c) => {
+            info!("Loaded config from {}", config_path);
+            c
+        }
         Err(e) => {
-            warn!("Failed to load config from {}: {}. Using defaults.", config_path, e);
+            warn!(
+                "Failed to load config from {}: {}. Using defaults.",
+                config_path, e
+            );
             astrbot_core::config::AstrBotConfig::default()
         }
     };
     for provider_cfg in &cfg.providers {
-        if !provider_cfg.enabled { continue; }
+        if !provider_cfg.enabled {
+            continue;
+        }
         if provider_cfg.provider_type == "openai_compatible" {
             runtime.register_openai_provider(
                 &provider_cfg.id,
                 provider_cfg.api_key.as_deref().unwrap_or(""),
-                provider_cfg.base_url.as_deref().unwrap_or("https://api.openai.com"),
+                provider_cfg
+                    .base_url
+                    .as_deref()
+                    .unwrap_or("https://api.openai.com"),
                 &provider_cfg.model,
             );
         }
     }
-    info!("Registered {} providers", runtime.provider_manager.list().len());
+    info!(
+        "Registered {} providers",
+        runtime.provider_manager.list().len()
+    );
     for platform_cfg in &cfg.platforms {
-        if !platform_cfg.enabled { continue; }
-        info!("Platform configured: {} (type={})", platform_cfg.id, platform_cfg.platform_type);
+        if !platform_cfg.enabled {
+            continue;
+        }
+        info!(
+            "Platform configured: {} (type={})",
+            platform_cfg.id, platform_cfg.platform_type
+        );
     }
     // Start dashboard in background
     let log_buffer_dashboard = log_buffer.clone();
     tokio::spawn(async move {
-        let pm = Arc::new(tokio::sync::RwLock::new(astrbot_plugin::PluginManager::new(std::path::PathBuf::from("plugins"))));
-        let pvm = Arc::new(tokio::sync::RwLock::new(astrbot_provider::client::ProviderManager::new()));
+        let pm = Arc::new(tokio::sync::RwLock::new(
+            astrbot_plugin::PluginManager::new(std::path::PathBuf::from("plugins")),
+        ));
+        let pvm = Arc::new(tokio::sync::RwLock::new(
+            astrbot_provider::client::ProviderManager::new(),
+        ));
         let state = astrbot_dashboard::app_state::AppState::new(pm, pvm)
             .with_log_buffer(log_buffer_dashboard);
         astrbot_dashboard::server::start_server(state).await;
@@ -228,9 +263,18 @@ async fn cmd_config(show: bool, set: Option<String>, file: &str) -> anyhow::Resu
     if exists {
         let content = tokio::fs::read_to_string(path).await?;
         let cfg: serde_json::Value = serde_json::from_str(&content)?;
-        println!(" Nickname: {}", cfg["nickname"].as_str().unwrap_or("AstrBot"));
-        println!(" Platforms: {}", cfg["platforms"].as_array().map(|a| a.len()).unwrap_or(0));
-        println!(" Providers: {}", cfg["providers"].as_array().map(|a| a.len()).unwrap_or(0));
+        println!(
+            " Nickname: {}",
+            cfg["nickname"].as_str().unwrap_or("AstrBot")
+        );
+        println!(
+            " Platforms: {}",
+            cfg["platforms"].as_array().map(|a| a.len()).unwrap_or(0)
+        );
+        println!(
+            " Providers: {}",
+            cfg["providers"].as_array().map(|a| a.len()).unwrap_or(0)
+        );
     }
     Ok(())
 }
@@ -242,21 +286,56 @@ async fn cmd_status(detailed: bool, config_file: &str) -> anyhow::Result<()> {
     println!("AstrBot Status");
     println!("==============");
     println!(" Version: {}", env!("CARGO_PKG_VERSION"));
-    println!(" Config: {} {}", config_file, if config_exists { "✅" } else { "❌" });
-    println!(" Data dir: {} {}", "data/", if data_dir_exists { "✅" } else { "❌" });
-    println!(" Plugins: {} {}", "plugins/", if plugins_dir_exists { "✅" } else { "❌" });
+    println!(
+        " Config: {} {}",
+        config_file,
+        if config_exists { "✅" } else { "❌" }
+    );
+    println!(
+        " Data dir: {} {}",
+        "data/",
+        if data_dir_exists { "✅" } else { "❌" }
+    );
+    println!(
+        " Plugins: {} {}",
+        "plugins/",
+        if plugins_dir_exists { "✅" } else { "❌" }
+    );
     if detailed && config_exists {
         let content = tokio::fs::read_to_string(config_file).await?;
         let cfg: serde_json::Value = serde_json::from_str(&content)?;
         println!("\nDetailed:");
-        println!(" Nickname: {}", cfg["nickname"].as_str().unwrap_or("AstrBot"));
-        println!(" Log level: {}", cfg["log_level"].as_str().unwrap_or("info"));
-        println!(" Database: {}", cfg["database_url"].as_str().unwrap_or("sqlite:data/data.db"));
-        println!(" Platforms: {}", cfg["platforms"].as_array().map(|a| a.len()).unwrap_or(0));
-        println!(" Providers: {}", cfg["providers"].as_array().map(|a| a.len()).unwrap_or(0));
-        println!(" Dashboard: http://{}:{}", cfg["webui"]["host"].as_str().unwrap_or("0.0.0.0"), cfg["webui"]["port"].as_u64().unwrap_or(6185));
+        println!(
+            " Nickname: {}",
+            cfg["nickname"].as_str().unwrap_or("AstrBot")
+        );
+        println!(
+            " Log level: {}",
+            cfg["log_level"].as_str().unwrap_or("info")
+        );
+        println!(
+            " Database: {}",
+            cfg["database_url"]
+                .as_str()
+                .unwrap_or("sqlite:data/data.db")
+        );
+        println!(
+            " Platforms: {}",
+            cfg["platforms"].as_array().map(|a| a.len()).unwrap_or(0)
+        );
+        println!(
+            " Providers: {}",
+            cfg["providers"].as_array().map(|a| a.len()).unwrap_or(0)
+        );
+        println!(
+            " Dashboard: http://{}:{}",
+            cfg["webui"]["host"].as_str().unwrap_or("0.0.0.0"),
+            cfg["webui"]["port"].as_u64().unwrap_or(6185)
+        );
     }
-    if !config_exists { return Err(anyhow::anyhow!("config file not found")); }
+    if !config_exists {
+        return Err(anyhow::anyhow!("config file not found"));
+    }
     Ok(())
 }
 
@@ -268,7 +347,10 @@ async fn cmd_plugin(action: PluginAction) -> anyhow::Result<()> {
         }
         PluginAction::Install { identifier } => {
             info!("Installing plugin: {}", identifier);
-            println!("📦 Installing {}... (installer not yet implemented)", identifier);
+            println!(
+                "📦 Installing {}... (installer not yet implemented)",
+                identifier
+            );
         }
         PluginAction::Uninstall { id } => {
             info!("Uninstalling plugin: {}", id);
@@ -296,23 +378,37 @@ async fn cmd_validate(config_path: &str) -> anyhow::Result<()> {
     let content = tokio::fs::read_to_string(path).await?;
     let cfg: serde_json::Value = serde_json::from_str(&content)?;
     let mut errors = Vec::new();
-    if cfg["nickname"].as_str().is_none() { errors.push("missing or invalid 'nickname'"); }
-    if !cfg["database_url"].as_str().is_some() { errors.push("missing 'database_url'"); }
+    if cfg["nickname"].as_str().is_none() {
+        errors.push("missing or invalid 'nickname'");
+    }
+    if !cfg["database_url"].as_str().is_some() {
+        errors.push("missing 'database_url'");
+    }
     if errors.is_empty() {
         println!("✅ Configuration is valid: {}", config_path);
         Ok(())
     } else {
         println!("❌ Configuration errors:");
-        for e in &errors { println!(" - {}", e); }
+        for e in &errors {
+            println!(" - {}", e);
+        }
         Err(anyhow::anyhow!("config validation failed"))
     }
 }
 
-async fn cmd_dashboard(port: u16, _config: &str, log_buffer: Arc<astrbot_dashboard::log_buffer::LogBuffer>) -> anyhow::Result<()> {
+async fn cmd_dashboard(
+    port: u16,
+    _config: &str,
+    log_buffer: Arc<astrbot_dashboard::log_buffer::LogBuffer>,
+) -> anyhow::Result<()> {
     info!("Starting dashboard on port {}", port);
     println!("Dashboard starting on http://0.0.0.0:{}", port);
-    let plugin_manager = Arc::new(tokio::sync::RwLock::new(astrbot_plugin::PluginManager::new(std::path::PathBuf::from("plugins"))));
-    let provider_manager = Arc::new(tokio::sync::RwLock::new(astrbot_provider::client::ProviderManager::new()));
+    let plugin_manager = Arc::new(tokio::sync::RwLock::new(
+        astrbot_plugin::PluginManager::new(std::path::PathBuf::from("plugins")),
+    ));
+    let provider_manager = Arc::new(tokio::sync::RwLock::new(
+        astrbot_provider::client::ProviderManager::new(),
+    ));
     let state = astrbot_dashboard::app_state::AppState::new(plugin_manager, provider_manager)
         .with_log_buffer(log_buffer);
     astrbot_dashboard::server::start_server(state).await;
@@ -322,13 +418,20 @@ async fn cmd_dashboard(port: u16, _config: &str, log_buffer: Arc<astrbot_dashboa
 async fn cmd_test(provider_id: &str, api_key: Option<&str>) -> anyhow::Result<()> {
     info!("Testing provider: {}", provider_id);
     let mut runtime = crate::runtime::BotRuntime::new(std::path::PathBuf::from("plugins"));
-    let key = api_key.map(|s| s.to_string()).unwrap_or_else(|| std::env::var("TEST_API_KEY").unwrap_or_else(|_| "sk-test".to_string()));
+    let key = api_key
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| std::env::var("TEST_API_KEY").unwrap_or_else(|_| "sk-test".to_string()));
     let test_provider = astrbot_provider::openai::OpenAiProvider::new(
-        provider_id.to_string(), key, "https://api.openai.com".to_string(), "gpt-4o-mini".to_string(),
+        provider_id.to_string(),
+        key,
+        "https://api.openai.com".to_string(),
+        "gpt-4o-mini".to_string(),
     );
     runtime.provider_manager.register(Arc::new(test_provider));
     let providers = runtime.provider_manager.list();
-    if providers.is_empty() { anyhow::bail!("No providers registered"); }
+    if providers.is_empty() {
+        anyhow::bail!("No providers registered");
+    }
     let p = providers[0];
     if p.health_check().await.unwrap_or(false) {
         println!("✅ Provider {} is healthy", p.name());
@@ -353,7 +456,9 @@ mod tests {
         assert!(temp.path().join("logs").exists());
         assert!(temp.path().join("tmp").exists());
         assert!(temp.path().join(".env").exists());
-        let content = tokio::fs::read_to_string(temp.path().join("config.json")).await.unwrap();
+        let content = tokio::fs::read_to_string(temp.path().join("config.json"))
+            .await
+            .unwrap();
         let cfg: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(cfg["nickname"].as_str().unwrap(), "AstrBot");
         assert_eq!(cfg["webui"]["port"].as_u64().unwrap(), 6185);
@@ -364,7 +469,9 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let dir = temp.path().to_str().unwrap();
         cmd_init(dir, true).await.unwrap();
-        let content = tokio::fs::read_to_string(temp.path().join("config.json")).await.unwrap();
+        let content = tokio::fs::read_to_string(temp.path().join("config.json"))
+            .await
+            .unwrap();
         let cfg: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert!(cfg["webui"]["tls_cert"].is_null());
     }
@@ -374,7 +481,9 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("config.json");
         let cfg = default_config();
-        tokio::fs::write(&path, serde_json::to_string_pretty(&cfg).unwrap()).await.unwrap();
+        tokio::fs::write(&path, serde_json::to_string_pretty(&cfg).unwrap())
+            .await
+            .unwrap();
         cmd_validate(path.to_str().unwrap()).await.unwrap();
     }
 
@@ -382,7 +491,9 @@ mod tests {
     async fn test_cmd_validate_fail() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("bad.json");
-        tokio::fs::write(&path, r#"{"invalid": true}"#).await.unwrap();
+        tokio::fs::write(&path, r#"{"invalid": true}"#)
+            .await
+            .unwrap();
         let result = cmd_validate(path.to_str().unwrap()).await;
         assert!(result.is_err());
     }
@@ -392,8 +503,12 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("config.json");
         let cfg = default_config();
-        tokio::fs::write(&path, serde_json::to_string_pretty(&cfg).unwrap()).await.unwrap();
-        cmd_config(true, None, path.to_str().unwrap()).await.unwrap();
+        tokio::fs::write(&path, serde_json::to_string_pretty(&cfg).unwrap())
+            .await
+            .unwrap();
+        cmd_config(true, None, path.to_str().unwrap())
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -401,7 +516,9 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("config.json");
         let cfg = default_config();
-        tokio::fs::write(&path, serde_json::to_string_pretty(&cfg).unwrap()).await.unwrap();
+        tokio::fs::write(&path, serde_json::to_string_pretty(&cfg).unwrap())
+            .await
+            .unwrap();
         let result = cmd_config(false, Some("badformat".to_string()), path.to_str().unwrap()).await;
         assert!(result.is_ok() || result.is_err());
     }
@@ -411,7 +528,9 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("config.json");
         let cfg = default_config();
-        tokio::fs::write(&path, serde_json::to_string_pretty(&cfg).unwrap()).await.unwrap();
+        tokio::fs::write(&path, serde_json::to_string_pretty(&cfg).unwrap())
+            .await
+            .unwrap();
         cmd_status(false, path.to_str().unwrap()).await.unwrap();
     }
 

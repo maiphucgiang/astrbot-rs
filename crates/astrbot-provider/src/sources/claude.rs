@@ -137,8 +137,7 @@ impl ChatProvider for ClaudeProvider {
                         continue;
                     }
                     if let Ok(json) = serde_json::from_str::<Value>(line) {
-                        if json.get("type").and_then(|t| t.as_str())
-                            == Some("content_block_delta")
+                        if json.get("type").and_then(|t| t.as_str()) == Some("content_block_delta")
                         {
                             if let Some(text) = json
                                 .get("delta")
@@ -227,7 +226,10 @@ mod tests {
         ];
         let body = provider.build_request_body(messages, &ChatOptions::default());
 
-        assert_eq!(body.get("system").unwrap().as_str(), Some("First system\n\nSecond system"));
+        assert_eq!(
+            body.get("system").unwrap().as_str(),
+            Some("First system\n\nSecond system")
+        );
         let msgs = body["messages"].as_array().unwrap();
         assert_eq!(msgs.len(), 2);
     }
@@ -259,7 +261,11 @@ mod tests {
         assert_eq!(body["model"].as_str(), Some("claude-3-opus-20240229"));
         assert_eq!(body["max_tokens"].as_u64(), Some(2048));
         let temp = body["temperature"].as_f64().unwrap();
-        assert!((temp - 0.5).abs() < 0.01, "temperature={}, expected 0.5", temp);
+        assert!(
+            (temp - 0.5).abs() < 0.01,
+            "temperature={}, expected 0.5",
+            temp
+        );
         let top_p = body["top_p"].as_f64().unwrap();
         assert!((top_p - 0.9).abs() < 0.01, "top_p={}, expected 0.9", top_p);
     }

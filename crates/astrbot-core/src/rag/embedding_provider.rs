@@ -335,7 +335,10 @@ mod tests {
             "sk-test",
             "text-embedding-3-small",
         );
-        let embs = provider.batch_embed(vec!["a".into(), "b".into()]).await.unwrap();
+        let embs = provider
+            .batch_embed(vec!["a".into(), "b".into()])
+            .await
+            .unwrap();
         assert_eq!(embs.len(), 2);
         assert_eq!(embs[0], vec![0.1_f32, 0.2]);
         assert_eq!(embs[1], vec![0.3_f32, 0.4]);
@@ -372,7 +375,10 @@ mod tests {
         let port = run_mock_http_server(body).await;
         let provider = GeminiEmbeddingProvider::new("gemini-2", "test-key", "embedding-001")
             .with_base_url(format!("http://127.0.0.1:{}", port));
-        let embs = provider.batch_embed(vec!["x".into(), "y".into()]).await.unwrap();
+        let embs = provider
+            .batch_embed(vec!["x".into(), "y".into()])
+            .await
+            .unwrap();
         assert_eq!(embs.len(), 2);
         assert_eq!(embs[0], vec![0.8_f32, 0.9]);
         assert_eq!(embs[1], vec![0.8_f32, 0.9]);

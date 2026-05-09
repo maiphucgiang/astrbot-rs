@@ -20,10 +20,7 @@ impl PlatformPipelineBridge {
     }
 
     /// 处理单条消息：Pipeline 执行 → 取 result → 发回平台
-    pub async fn handle_message(
-        &self,
-        msg: AstrBotMessage,
-    ) -> Result<Option<MessageChain>> {
+    pub async fn handle_message(&self, msg: AstrBotMessage) -> Result<Option<MessageChain>> {
         let mut event = PipelineEvent::new(msg);
         self.pipeline.execute(&mut event).await?;
         Ok(event.result_chain.clone())
@@ -71,11 +68,19 @@ impl TelegramPipelineAdapter {
                     if let Some(msg) = update.get("message") {
                         let astr_msg = self.parse_telegram_message(msg);
                         if let Ok(Some(chain)) = self.bridge.handle_message(astr_msg).await {
-                            let chat_id = msg.get("chat").and_then(|c| c.get("id")).and_then(|i| i.as_i64()).unwrap_or(0);
+                            let chat_id = msg
+                                .get("chat")
+                                .and_then(|c| c.get("id"))
+                                .and_then(|i| i.as_i64())
+                                .unwrap_or(0);
                             let reply_text = chain.plain_text();
                             let _ = self.send_telegram_message(chat_id, &reply_text).await;
                         }
-                        offset = update.get("update_id").and_then(|u| u.as_i64()).unwrap_or(offset) + 1;
+                        offset = update
+                            .get("update_id")
+                            .and_then(|u| u.as_i64())
+                            .unwrap_or(offset)
+                            + 1;
                     }
                 }
             }
@@ -85,13 +90,35 @@ impl TelegramPipelineAdapter {
     }
 
     fn parse_telegram_message(&self, msg: &serde_json::Value) -> AstrBotMessage {
-        let text = msg.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string();
-        let chat_id = msg.get("chat").and_then(|c| c.get("id")).and_then(|i| i.as_i64()).unwrap_or(0).to_string();
-        let user_id = msg.get("from").and_then(|f| f.get("id")).and_then(|i| i.as_i64()).unwrap_or(0).to_string();
-        let username = msg.get("from").and_then(|f| f.get("username")).and_then(|u| u.as_str()).map(|s| s.to_string());
+        let text = msg
+            .get("text")
+            .and_then(|t| t.as_str())
+            .unwrap_or("")
+            .to_string();
+        let chat_id = msg
+            .get("chat")
+            .and_then(|c| c.get("id"))
+            .and_then(|i| i.as_i64())
+            .unwrap_or(0)
+            .to_string();
+        let user_id = msg
+            .get("from")
+            .and_then(|f| f.get("id"))
+            .and_then(|i| i.as_i64())
+            .unwrap_or(0)
+            .to_string();
+        let username = msg
+            .get("from")
+            .and_then(|f| f.get("username"))
+            .and_then(|u| u.as_str())
+            .map(|s| s.to_string());
 
         AstrBotMessage {
-            message_id: msg.get("message_id").and_then(|m| m.as_i64()).unwrap_or(0).to_string(),
+            message_id: msg
+                .get("message_id")
+                .and_then(|m| m.as_i64())
+                .unwrap_or(0)
+                .to_string(),
             timestamp: chrono::Utc::now(),
             platform: PlatformType::Telegram,
             session_id: chat_id.clone(),
@@ -110,7 +137,8 @@ impl TelegramPipelineAdapter {
 
     async fn send_telegram_message(&self, chat_id: i64, text: &str) -> Result<()> {
         let url = format!("https://api.telegram.org/bot{}/sendMessage", self.bot_token);
-        let _ = self.http_client
+        let _ = self
+            .http_client
             .post(&url)
             .json(&serde_json::json!({"chat_id": chat_id, "text": text}))
             .send()

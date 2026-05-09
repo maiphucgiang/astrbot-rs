@@ -1,16 +1,16 @@
+use astrbot_core::message::{AstrBotMessage, MessageChain, MessageMember, MessageType};
 use astrbot_core::pipeline::{
-    ContentSafetyCheckStage, PipelineContext, PipelineScheduler, PreProcessStage,
-    ProcessStage, RateLimitStage, RespondStage, ResultDecorateStage, SendFn,
-    SessionStatusCheckStage, StageRegistry, WakingCheckStage, WhitelistCheckStage,
+    ContentSafetyCheckStage, PipelineContext, PipelineScheduler, PreProcessStage, ProcessStage,
+    RateLimitStage, RespondStage, ResultDecorateStage, SendFn, SessionStatusCheckStage,
+    StageRegistry, WakingCheckStage, WhitelistCheckStage,
 };
 use astrbot_core::platform::MessageSource;
-use astrbot_core::message::{AstrBotMessage, MessageChain, MessageMember, MessageType};
 use astrbot_core::platform::PlatformType;
 use astrbot_plugin::manager::PluginManager;
 use astrbot_provider::client::ProviderManager;
 use std::sync::Arc;
-use tracing::{error, info, warn};
 use tokio::io::AsyncBufReadExt;
+use tracing::{error, info, warn};
 
 /// ConsoleSender — prints AI replies to stdout
 pub struct ConsoleSender;
@@ -45,13 +45,7 @@ impl BotRuntime {
     }
 
     /// Register an OpenAI-compatible provider from config
-    pub fn register_openai_provider(
-        &mut self,
-        id: &str,
-        api_key: &str,
-        url: &str,
-        model: &str,
-    ) {
+    pub fn register_openai_provider(&mut self, id: &str, api_key: &str, url: &str, model: &str) {
         let provider = astrbot_provider::openai::OpenAiProvider::new(
             id.to_string(),
             api_key.to_string(),
@@ -61,7 +55,10 @@ impl BotRuntime {
         let arc = Arc::new(provider);
         self.providers.push(arc.clone());
         self.provider_manager.register(arc);
-        info!("[Runtime] Registered OpenAI provider: {} (model: {})", id, model);
+        info!(
+            "[Runtime] Registered OpenAI provider: {} (model: {})",
+            id, model
+        );
     }
 
     /// Build the 9-stage pipeline with provider and sender bindings
@@ -79,13 +76,25 @@ impl BotRuntime {
         let respond_stage = RespondStage::new().with_sender(sender);
 
         registry.register("WakingCheckStage", Box::new(WakingCheckStage::default()));
-        registry.register("WhitelistCheckStage", Box::new(WhitelistCheckStage::default()));
-        registry.register("SessionStatusCheckStage", Box::new(SessionStatusCheckStage::default()));
+        registry.register(
+            "WhitelistCheckStage",
+            Box::new(WhitelistCheckStage::default()),
+        );
+        registry.register(
+            "SessionStatusCheckStage",
+            Box::new(SessionStatusCheckStage::default()),
+        );
         registry.register("RateLimitStage", Box::new(RateLimitStage::default()));
-        registry.register("ContentSafetyCheckStage", Box::new(ContentSafetyCheckStage::default()));
+        registry.register(
+            "ContentSafetyCheckStage",
+            Box::new(ContentSafetyCheckStage::default()),
+        );
         registry.register("PreProcessStage", Box::new(PreProcessStage::default()));
         registry.register("ProcessStage", Box::new(process_stage));
-        registry.register("ResultDecorateStage", Box::new(ResultDecorateStage::default()));
+        registry.register(
+            "ResultDecorateStage",
+            Box::new(ResultDecorateStage::default()),
+        );
         registry.register("RespondStage", Box::new(respond_stage));
 
         registry.initialize_all(&ctx).await?;

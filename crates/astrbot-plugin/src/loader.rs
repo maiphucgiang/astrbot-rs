@@ -28,12 +28,13 @@ impl PluginLoader {
     /// Scan plugin_dir and return all valid plugin descriptors.
     pub async fn scan(&self) -> Result<Vec<StarDescriptor>> {
         let mut descriptors = Vec::new();
-        let mut entries = tokio::fs::read_dir(&self.plugin_dir)
-            .await
-            .map_err(|e| AstrBotError::Plugin {
-                plugin: "loader".to_string(),
-                message: format!("Failed to read plugin dir: {}", e),
-            })?;
+        let mut entries =
+            tokio::fs::read_dir(&self.plugin_dir)
+                .await
+                .map_err(|e| AstrBotError::Plugin {
+                    plugin: "loader".to_string(),
+                    message: format!("Failed to read plugin dir: {}", e),
+                })?;
 
         while let Some(entry) = entries
             .next_entry()
@@ -50,16 +51,20 @@ impl PluginLoader {
 
             let meta_path = path.join("metadata.json");
             if !meta_path.exists() {
-                warn!("[PluginLoader] skipping {} — no metadata.json", path.display());
+                warn!(
+                    "[PluginLoader] skipping {} — no metadata.json",
+                    path.display()
+                );
                 continue;
             }
 
-            let content = tokio::fs::read_to_string(&meta_path)
-                .await
-                .map_err(|e| AstrBotError::Plugin {
-                    plugin: "loader".to_string(),
-                    message: format!("Failed to read metadata: {}", e),
-                })?;
+            let content =
+                tokio::fs::read_to_string(&meta_path)
+                    .await
+                    .map_err(|e| AstrBotError::Plugin {
+                        plugin: "loader".to_string(),
+                        message: format!("Failed to read metadata: {}", e),
+                    })?;
 
             let metadata: PluginMetadata = serde_json::from_str(&content)
                 .map_err(|e| AstrBotError::Serialization(format!("Invalid metadata: {}", e)))?;
@@ -100,10 +105,7 @@ impl PluginLoader {
     /// will be implemented later. Returns a Star with metadata but no plugin impl.
     pub async fn instantiate(&self, desc: &StarDescriptor) -> Result<Star> {
         let mut star = Star::new(desc.metadata.clone());
-        info!(
-            "[PluginLoader] instantiated skeleton for '{}'",
-            desc.name
-        );
+        info!("[PluginLoader] instantiated skeleton for '{}'", desc.name);
         Ok(star)
     }
 
@@ -117,14 +119,16 @@ impl PluginLoader {
             )));
         }
         let meta_path = path.join("metadata.json");
-        let content = tokio::fs::read_to_string(&meta_path)
-            .await
-            .map_err(|e| AstrBotError::Plugin {
-                plugin: "loader".to_string(),
-                message: format!("Failed to read metadata on reload: {}", e),
-            })?;
-        let metadata: PluginMetadata = serde_json::from_str(&content)
-            .map_err(|e| AstrBotError::Serialization(format!("Invalid metadata on reload: {}", e)))?;
+        let content =
+            tokio::fs::read_to_string(&meta_path)
+                .await
+                .map_err(|e| AstrBotError::Plugin {
+                    plugin: "loader".to_string(),
+                    message: format!("Failed to read metadata on reload: {}", e),
+                })?;
+        let metadata: PluginMetadata = serde_json::from_str(&content).map_err(|e| {
+            AstrBotError::Serialization(format!("Invalid metadata on reload: {}", e))
+        })?;
         Ok(StarDescriptor {
             metadata,
             path,

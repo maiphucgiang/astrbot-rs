@@ -55,7 +55,10 @@ pub async fn jwt_middleware(
         }
     };
 
-    let secret = state.jwt_secret.as_deref().unwrap_or("astrbot-default-secret");
+    let secret = state
+        .jwt_secret
+        .as_deref()
+        .unwrap_or("astrbot-default-secret");
     match decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret.as_bytes()),
@@ -92,7 +95,10 @@ pub async fn login_handler(
         iat: now.timestamp(),
     };
 
-    let secret = state.jwt_secret.as_deref().unwrap_or("astrbot-default-secret");
+    let secret = state
+        .jwt_secret
+        .as_deref()
+        .unwrap_or("astrbot-default-secret");
     match encode(
         &Header::default(),
         &claims,
@@ -136,8 +142,12 @@ mod tests {
     #[tokio::test]
     async fn test_login_wrong_password() {
         let state = AppState::new(
-            Arc::new(tokio::sync::RwLock::new(astrbot_plugin::PluginManager::new(std::path::PathBuf::from("plugins")))),
-            Arc::new(tokio::sync::RwLock::new(astrbot_provider::client::ProviderManager::new())),
+            Arc::new(tokio::sync::RwLock::new(
+                astrbot_plugin::PluginManager::new(std::path::PathBuf::from("plugins")),
+            )),
+            Arc::new(tokio::sync::RwLock::new(
+                astrbot_provider::client::ProviderManager::new(),
+            )),
         );
         let payload = json!({"password": "wrong"});
         let result = login_handler(State(state), Json(payload)).await;
@@ -147,9 +157,14 @@ mod tests {
     #[tokio::test]
     async fn test_login_correct_password_returns_token() {
         let state = AppState::new(
-            Arc::new(tokio::sync::RwLock::new(astrbot_plugin::PluginManager::new(std::path::PathBuf::from("plugins")))),
-            Arc::new(tokio::sync::RwLock::new(astrbot_provider::client::ProviderManager::new())),
-        ).with_jwt("test-secret".to_string(), "astrbot".to_string());
+            Arc::new(tokio::sync::RwLock::new(
+                astrbot_plugin::PluginManager::new(std::path::PathBuf::from("plugins")),
+            )),
+            Arc::new(tokio::sync::RwLock::new(
+                astrbot_provider::client::ProviderManager::new(),
+            )),
+        )
+        .with_jwt("test-secret".to_string(), "astrbot".to_string());
         let payload = json!({"password": "astrbot"});
         let result = login_handler(State(state), Json(payload)).await;
         assert_eq!(result.0["success"], true);

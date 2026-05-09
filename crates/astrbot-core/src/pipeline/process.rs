@@ -5,11 +5,15 @@ use tracing::{info, warn};
 
 use crate::agent::{AgentContext, AgentRegistry, AgentResult, ToolCall};
 use crate::errors::Result;
-use crate::message::{AstrBotMessage, MessageChain, MessageEventResult, MessageMember, MessageType};
+use crate::message::{
+    AstrBotMessage, MessageChain, MessageEventResult, MessageMember, MessageType,
+};
 use crate::pipeline::{PipelineContext, PipelineEvent, Stage, StageFlow};
 use crate::platform::{MessageSource, PlatformType};
 use crate::plugin::PluginDispatcher;
-use crate::provider::{ChatConfig, ChatMessage, ChatResponse, ChatStreamChunk, ModelInfo, Provider};
+use crate::provider::{
+    ChatConfig, ChatMessage, ChatResponse, ChatStreamChunk, ModelInfo, Provider,
+};
 
 /// ProcessStage — 核心消息处理阶段
 ///
@@ -148,16 +152,9 @@ impl ProcessStage {
     }
 
     /// 更新会话历史
-    async fn update_history(
-        &self,
-        session_id: &str,
-        user_msg: String,
-        assistant_msg: String,
-    ) {
+    async fn update_history(&self, session_id: &str, user_msg: String, assistant_msg: String) {
         let mut lock = self.session_history.lock().await;
-        let entry = lock
-            .entry(session_id.to_string())
-            .or_insert_with(Vec::new);
+        let entry = lock.entry(session_id.to_string()).or_insert_with(Vec::new);
         entry.push(ChatMessage::user(user_msg));
         entry.push(ChatMessage::assistant(assistant_msg));
         // 保留最近 20 轮
@@ -175,10 +172,9 @@ impl ProcessStage {
         user_id: String,
         session_id: String,
     ) -> Result<String> {
-        let registry = self
-            .agent_registry
-            .as_ref()
-            .ok_or_else(|| crate::errors::AstrBotError::Internal("Agent registry not set".to_string()))?;
+        let registry = self.agent_registry.as_ref().ok_or_else(|| {
+            crate::errors::AstrBotError::Internal("Agent registry not set".to_string())
+        })?;
 
         let ctx = AgentContext {
             messages,
@@ -203,18 +199,15 @@ impl ProcessStage {
                 ))
             }
             AgentResult::PassThrough => Ok(String::new()),
-            AgentResult::Error { message } => {
-                Err(crate::errors::AstrBotError::Internal(message))
-            }
+            AgentResult::Error { message } => Err(crate::errors::AstrBotError::Internal(message)),
         }
     }
 
     /// 调用 LLM Provider 兜底
     async fn run_provider(&self, messages: Vec<ChatMessage>) -> Result<String> {
-        let provider = self
-            .default_provider
-            .as_ref()
-            .ok_or_else(|| crate::errors::AstrBotError::Internal("No provider configured".to_string()))?;
+        let provider = self.default_provider.as_ref().ok_or_else(|| {
+            crate::errors::AstrBotError::Internal("No provider configured".to_string())
+        })?;
 
         let config = ChatConfig {
             stream: false,
@@ -273,10 +266,7 @@ impl Stage for ProcessStage {
             {
                 Ok(text) => text,
                 Err(e) => {
-                    warn!(
-                        "Agent execution failed: {}, falling back to provider",
-                        e
-                    );
+                    warn!("Agent execution failed: {}, falling back to provider", e);
                     self.run_provider(messages).await?
                 }
             }
@@ -291,12 +281,8 @@ impl Stage for ProcessStage {
             event.result_chain = Some(reply_chain);
 
             // 更新历史
-            self.update_history(
-                &event.message.session_id,
-                user_input,
-                response_text,
-            )
-            .await;
+            self.update_history(&event.message.session_id, user_input, response_text)
+                .await;
         }
 
         Ok(StageFlow::Done)
@@ -350,7 +336,9 @@ mod tests {
             &self,
             _messages: Vec<ChatMessage>,
             _config: ChatConfig,
-        ) -> crate::errors::Result<Box<dyn futures_util::Stream<Item = crate::errors::Result<ChatStreamChunk>> + Send>> {
+        ) -> crate::errors::Result<
+            Box<dyn futures_util::Stream<Item = crate::errors::Result<ChatStreamChunk>> + Send>,
+        > {
             let chunk = ChatStreamChunk {
                 delta: self.response.clone(),
                 finish_reason: Some("stop".to_string()),
@@ -489,7 +477,9 @@ mod tests {
             response: "long".to_string(),
         });
         let stage = ProcessStage::new().with_provider(provider);
-        let mut event = make_event("this is a very long message that should still be processed correctly by the stage");
+        let mut event = make_event(
+            "this is a very long message that should still be processed correctly by the stage",
+        );
         let result = stage.process(&mut event).await;
         assert!(result.is_ok());
     }

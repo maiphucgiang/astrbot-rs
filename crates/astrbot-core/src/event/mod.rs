@@ -81,9 +81,13 @@ impl EventResult {
     /// Convert to MessageEventResult (for on_message default impl)
     pub fn into_message_result(self) -> crate::message::MessageEventResult {
         match self {
-            EventResult::MessageReply { chain } => crate::message::MessageEventResult::Reply { chain },
+            EventResult::MessageReply { chain } => {
+                crate::message::MessageEventResult::Reply { chain }
+            }
             EventResult::Nothing => crate::message::MessageEventResult::Nothing,
-            EventResult::Forward { target, chain } => crate::message::MessageEventResult::Forward { target, chain },
+            EventResult::Forward { target, chain } => {
+                crate::message::MessageEventResult::Forward { target, chain }
+            }
             _ => crate::message::MessageEventResult::Nothing,
         }
     }

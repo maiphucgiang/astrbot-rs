@@ -21,11 +21,11 @@
 //!
 //! 当前版本：线性串行执行（所有节点按顺序执行），条件分支为基础 if/else。
 
-use async_trait::async_trait;
+use super::{AgentConfig, AgentContext, AgentExecutor, AgentResult, ToolResult};
 use crate::errors::{AstrBotError, Result};
 use crate::platform::MessageSource;
 use crate::provider::ChatMessage;
-use super::{AgentContext, AgentResult, AgentExecutor, AgentConfig, ToolResult};
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -97,9 +97,15 @@ pub enum WorkflowNode {
     },
 }
 
-fn default_output_key() -> String { "llm_output".to_string() }
-fn default_input_key() -> String { "llm_output".to_string() }
-fn default_tool_output_key() -> String { "tool_output".to_string() }
+fn default_output_key() -> String {
+    "llm_output".to_string()
+}
+fn default_input_key() -> String {
+    "llm_output".to_string()
+}
+fn default_tool_output_key() -> String {
+    "tool_output".to_string()
+}
 
 /// Simple condition expression for conditional nodes.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -118,18 +124,13 @@ pub enum ConditionExpr {
 impl ConditionExpr {
     pub fn evaluate(&self, state: &State) -> bool {
         match self {
-            ConditionExpr::Has { key } => {
-                state.get(key).map(|v| !is_falsy(v)).unwrap_or(false)
-            }
-            ConditionExpr::Eq { key, value } => {
-                state.get(key).map(|v| v == value).unwrap_or(false)
-            }
-            ConditionExpr::Contains { key, substring } => {
-                state.get(key)
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.contains(substring))
-                    .unwrap_or(false)
-            }
+            ConditionExpr::Has { key } => state.get(key).map(|v| !is_falsy(v)).unwrap_or(false),
+            ConditionExpr::Eq { key, value } => state.get(key).map(|v| v == value).unwrap_or(false),
+            ConditionExpr::Contains { key, substring } => state
+                .get(key)
+                .and_then(|v| v.as_str())
+                .map(|s| s.contains(substring))
+                .unwrap_or(false),
         }
     }
 }
@@ -175,13 +176,20 @@ impl WorkflowGraph {
         for node in &def.nodes {
             let id = node_id(node);
             if node_map.contains_key(&id) {
-                return Err(AstrBotError::Config(format!("workflow.node.{}: Duplicate node id: {}", id, id)));
+                return Err(AstrBotError::Config(format!(
+                    "workflow.node.{}: Duplicate node id: {}",
+                    id, id
+                )));
             }
             node_map.insert(id.clone(), node.clone());
         }
         // Validate start node exists
         if !node_map.contains_key("start") {
-            return Err(AstrBotError::Config(format!("{}: {}", "workflow.start".to_string(), "Workflow must have a 'start' node".to_string(),)));
+            return Err(AstrBotError::Config(format!(
+                "{}: {}",
+                "workflow.start".to_string(),
+                "Workflow must have a 'start' node".to_string(),
+            )));
         }
         Ok(Self {
             definition: def,
@@ -198,7 +206,12 @@ impl WorkflowGraph {
             WorkflowNode::Start { next, .. } => next.clone(),
             WorkflowNode::LlmCall { next, .. } => next.clone(),
             WorkflowNode::ToolCall { next, .. } => next.clone(),
-            WorkflowNode::Conditional { condition, then_next, else_next, .. } => {
+            WorkflowNode::Conditional {
+                condition,
+                then_next,
+                else_next,
+                ..
+            } => {
                 if condition.evaluate(state) {
                     then_next.clone()
                 } else {
@@ -296,12 +309,15 @@ impl LlmClient {
         temperature: Option<f32>,
         max_tokens: Option<u32>,
     ) -> Result<String> {
-        let mut msgs: Vec<serde_json::Value> = messages.iter().map(|m| {
-            json!({
-                "role": m.role,
-                "content": m.content,
+        let mut msgs: Vec<serde_json::Value> = messages
+            .iter()
+            .map(|m| {
+                json!({
+                    "role": m.role,
+                    "content": m.content,
+                })
             })
-        }).collect();
+            .collect();
 
         if let Some(template) = prompt_template {
             let rendered = self.render_template(template, state, user_input);
@@ -323,8 +339,12 @@ impl LlmClient {
             "max_tokens": max_tokens,
         });
 
-        let url = format!("{}/v1/chat/completions", self.base_url.trim_end_matches('/'));
-        let resp = self.http_client
+        let url = format!(
+            "{}/v1/chat/completions",
+            self.base_url.trim_end_matches('/')
+        );
+        let resp = self
+            .http_client
             .post(&url)
             .headers(self.auth_headers())
             .json(&body)
@@ -342,12 +362,13 @@ impl LlmClient {
             });
         }
 
-        let parsed: serde_json::Value = serde_json::from_str(&body_text)
-            .map_err(|e| AstrBotError::Serialization(format!(
+        let parsed: serde_json::Value = serde_json::from_str(&body_text).map_err(|e| {
+            AstrBotError::Serialization(format!(
                 "DeerFlow LLM parse error: {} — body: {}",
                 e,
                 &body_text[..body_text.len().min(500)]
-            )))?;
+            ))
+        })?;
 
         let content = parsed
             .get("choices")
@@ -393,16 +414,16 @@ impl DeerFlowEngine {
     }
 
     /// Execute the workflow from the `start` node.
-    pub async fn run(
-        &self,
-        ctx: &WorkflowRunContext,
-    ) -> Result<AgentResult> {
+    pub async fn run(&self, ctx: &WorkflowRunContext) -> Result<AgentResult> {
         let mut current_id = "start".to_string();
         let mut state = ctx.state.clone();
 
         // Seed user_input into state (only if not already present from extras)
         if !state.contains_key("user_input") {
-            state.insert("user_input".to_string(), Value::String(ctx.user_input.clone()));
+            state.insert(
+                "user_input".to_string(),
+                Value::String(ctx.user_input.clone()),
+            );
         }
 
         let max_steps = 100usize;
@@ -410,10 +431,10 @@ impl DeerFlowEngine {
 
         while steps < max_steps {
             steps += 1;
-            let node = self.graph.get_node(&current_id)
-                .ok_or_else(|| AstrBotError::NotFound(format!(
-                    "workflow node: {}", current_id
-                )))?;
+            let node = self
+                .graph
+                .get_node(&current_id)
+                .ok_or_else(|| AstrBotError::NotFound(format!("workflow node: {}", current_id)))?;
 
             match node {
                 WorkflowNode::Start { .. } => {
@@ -427,15 +448,18 @@ impl DeerFlowEngine {
                     output_key,
                     ..
                 } => {
-                    let response = self.llm_client.chat(
-                        ctx.messages.clone(),
-                        prompt_template.as_deref(),
-                        &state,
-                        &ctx.user_input,
-                        model.as_deref(),
-                        *temperature,
-                        *max_tokens,
-                    ).await?;
+                    let response = self
+                        .llm_client
+                        .chat(
+                            ctx.messages.clone(),
+                            prompt_template.as_deref(),
+                            &state,
+                            &ctx.user_input,
+                            model.as_deref(),
+                            *temperature,
+                            *max_tokens,
+                        )
+                        .await?;
                     state.insert(output_key.clone(), Value::String(response));
                 }
                 WorkflowNode::ToolCall {
@@ -444,7 +468,10 @@ impl DeerFlowEngine {
                     output_key,
                     ..
                 } => {
-                    let input = state.get(input_key.as_str()).cloned().unwrap_or(Value::Null);
+                    let input = state
+                        .get(input_key.as_str())
+                        .cloned()
+                        .unwrap_or(Value::Null);
                     let mut results = Vec::new();
                     for tool_name in tool_names {
                         if let Some(callback) = self.tools.get(tool_name) {
@@ -475,7 +502,8 @@ impl DeerFlowEngine {
                     let _ = condition;
                 }
                 WorkflowNode::End { output_key, .. } => {
-                    let output = state.get(output_key.as_str())
+                    let output = state
+                        .get(output_key.as_str())
                         .map(|v| match v {
                             Value::String(s) => s.clone(),
                             other => other.to_string(),
@@ -505,7 +533,9 @@ impl DeerFlowEngine {
             }
         }
 
-        Err(AstrBotError::Internal("DeerFlow workflow exceeded max steps (100)".to_string()))
+        Err(AstrBotError::Internal(
+            "DeerFlow workflow exceeded max steps (100)".to_string(),
+        ))
     }
 }
 
@@ -532,7 +562,13 @@ impl DeerFlowAgentRunner {
             .config
             .get("api_key")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| AstrBotError::Config(format!("{}: {}", "api_key".to_string(), "Missing DeerFlow API key".to_string(),)))?
+            .ok_or_else(|| {
+                AstrBotError::Config(format!(
+                    "{}: {}",
+                    "api_key".to_string(),
+                    "Missing DeerFlow API key".to_string(),
+                ))
+            })?
             .to_string();
 
         let base_url = config
@@ -549,15 +585,18 @@ impl DeerFlowAgentRunner {
             .unwrap_or("gpt-3.5-turbo")
             .to_string();
 
-        let workflow_json = config
-            .config
-            .get("workflow_json")
-            .ok_or_else(|| AstrBotError::Config(format!("{}: {}", "workflow_json".to_string(), "Missing DeerFlow workflow JSON".to_string(),)))?;
+        let workflow_json = config.config.get("workflow_json").ok_or_else(|| {
+            AstrBotError::Config(format!(
+                "{}: {}",
+                "workflow_json".to_string(),
+                "Missing DeerFlow workflow JSON".to_string(),
+            ))
+        })?;
 
         let workflow_def: WorkflowDefinition = serde_json::from_value(workflow_json.clone())
-            .map_err(|e| AstrBotError::Serialization(format!(
-                "DeerFlow workflow parse error: {}", e
-            )))?;
+            .map_err(|e| {
+                AstrBotError::Serialization(format!("DeerFlow workflow parse error: {}", e))
+            })?;
 
         let graph = WorkflowGraph::from_definition(workflow_def)?;
         let llm_client = LlmClient::new(api_key, base_url, model);
@@ -599,7 +638,9 @@ impl AgentExecutor for DeerFlowAgentRunner {
     }
 
     async fn execute(&self, ctx: &AgentContext) -> Result<AgentResult> {
-        let user_input = ctx.messages.last()
+        let user_input = ctx
+            .messages
+            .last()
             .map(|m| m.content.clone())
             .unwrap_or_default();
 
@@ -642,7 +683,9 @@ impl AgentExecutor for DeerFlowAgentRunner {
                 }),
             );
         }
-        let user_input = ctx.messages.last()
+        let user_input = ctx
+            .messages
+            .last()
             .map(|m| m.content.clone())
             .unwrap_or_default();
 
@@ -666,9 +709,15 @@ impl AgentExecutor for DeerFlowAgentRunner {
             "{}/v1/models",
             self.engine.llm_client.base_url.trim_end_matches('/')
         );
-        let resp = self.engine.llm_client.http_client
+        let resp = self
+            .engine
+            .llm_client
+            .http_client
             .get(&url)
-            .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", self.engine.llm_client.api_key))
+            .header(
+                reqwest::header::AUTHORIZATION,
+                format!("Bearer {}", self.engine.llm_client.api_key),
+            )
             .send()
             .await;
         match resp {
@@ -710,9 +759,7 @@ mod tests {
 
     fn make_test_context() -> AgentContext {
         AgentContext {
-            messages: vec![
-                ChatMessage::user("Hello"),
-            ],
+            messages: vec![ChatMessage::user("Hello")],
             source: MessageSource {
                 platform: crate::platform::PlatformType::Custom,
                 session_id: "test-chat".to_string(),
@@ -817,7 +864,9 @@ mod tests {
     #[test]
     fn test_condition_has() {
         let mut state = State::new();
-        let cond = ConditionExpr::Has { key: "foo".to_string() };
+        let cond = ConditionExpr::Has {
+            key: "foo".to_string(),
+        };
         assert!(!cond.evaluate(&state));
         state.insert("foo".to_string(), Value::String("bar".to_string()));
         assert!(cond.evaluate(&state));
@@ -826,7 +875,10 @@ mod tests {
     #[test]
     fn test_condition_eq() {
         let mut state = State::new();
-        let cond = ConditionExpr::Eq { key: "num".to_string(), value: Value::Number(42.into()) };
+        let cond = ConditionExpr::Eq {
+            key: "num".to_string(),
+            value: Value::Number(42.into()),
+        };
         assert!(!cond.evaluate(&state));
         state.insert("num".to_string(), Value::Number(42.into()));
         assert!(cond.evaluate(&state));
@@ -835,7 +887,10 @@ mod tests {
     #[test]
     fn test_condition_contains() {
         let mut state = State::new();
-        let cond = ConditionExpr::Contains { key: "text".to_string(), substring: "world".to_string() };
+        let cond = ConditionExpr::Contains {
+            key: "text".to_string(),
+            substring: "world".to_string(),
+        };
         assert!(!cond.evaluate(&state));
         state.insert("text".to_string(), Value::String("hello world".to_string()));
         assert!(cond.evaluate(&state));
@@ -844,7 +899,9 @@ mod tests {
     #[test]
     fn test_condition_falsy() {
         let mut state = State::new();
-        let cond = ConditionExpr::Has { key: "empty".to_string() };
+        let cond = ConditionExpr::Has {
+            key: "empty".to_string(),
+        };
         state.insert("empty".to_string(), Value::String("".to_string()));
         assert!(!cond.evaluate(&state));
         state.insert("empty".to_string(), Value::Array(vec![]));
@@ -856,10 +913,16 @@ mod tests {
         let wf: WorkflowDefinition = serde_json::from_value(linear_workflow()).unwrap();
         let graph = WorkflowGraph::from_definition(wf).unwrap();
         let start = graph.get_node("start").unwrap();
-        assert_eq!(graph.next_node_id(start, &State::new()), Some("llm1".to_string()));
+        assert_eq!(
+            graph.next_node_id(start, &State::new()),
+            Some("llm1".to_string())
+        );
 
         let llm = graph.get_node("llm1").unwrap();
-        assert_eq!(graph.next_node_id(llm, &State::new()), Some("end".to_string()));
+        assert_eq!(
+            graph.next_node_id(llm, &State::new()),
+            Some("end".to_string())
+        );
 
         let end = graph.get_node("end").unwrap();
         assert_eq!(graph.next_node_id(end, &State::new()), None);
@@ -873,10 +936,16 @@ mod tests {
 
         let mut state_with = State::new();
         state_with.insert("llm_output".to_string(), Value::String("yes".to_string()));
-        assert_eq!(graph.next_node_id(cond, &state_with), Some("end".to_string()));
+        assert_eq!(
+            graph.next_node_id(cond, &state_with),
+            Some("end".to_string())
+        );
 
         let mut state_without = State::new();
-        assert_eq!(graph.next_node_id(cond, &state_without), Some("llm1".to_string()));
+        assert_eq!(
+            graph.next_node_id(cond, &state_without),
+            Some("llm1".to_string())
+        );
     }
 
     // ------------------------------------------------------------------
@@ -889,7 +958,9 @@ mod tests {
             .unwrap();
         let mut handled = 0;
         while handled < 200 {
-            match tokio::time::timeout(tokio::time::Duration::from_millis(500), listener.accept()).await {
+            match tokio::time::timeout(tokio::time::Duration::from_millis(500), listener.accept())
+                .await
+            {
                 Ok(Ok((mut stream, _))) => {
                     let mut buf = vec![0u8; 4096];
                     let n = stream.read(&mut buf).await.unwrap_or(0);
@@ -920,15 +991,18 @@ mod tests {
             "gpt-test".to_string(),
         );
         let state = State::new();
-        let result = client.chat(
-            vec![ChatMessage::user("hi")],
-            Some("Say hello to {{user_input}}"),
-            &state,
-            "Alice",
-            None,
-            None,
-            None,
-        ).await.unwrap();
+        let result = client
+            .chat(
+                vec![ChatMessage::user("hi")],
+                Some("Say hello to {{user_input}}"),
+                &state,
+                "Alice",
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(result, "Mocked LLM reply");
         let _ = server.await;
@@ -947,15 +1021,18 @@ mod tests {
             "gpt-test".to_string(),
         );
         let state = State::new();
-        let result = client.chat(
-            vec![ChatMessage::user("hi")],
-            None,
-            &state,
-            "direct input",
-            None,
-            None,
-            None,
-        ).await.unwrap();
+        let result = client
+            .chat(
+                vec![ChatMessage::user("hi")],
+                None,
+                &state,
+                "direct input",
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(result, "Direct reply");
         let _ = server.await;
@@ -1027,7 +1104,8 @@ mod tests {
         });
 
         let mut ctx = make_test_context();
-        ctx.extras.insert("user_input".to_string(), Value::String("hello".to_string()));
+        ctx.extras
+            .insert("user_input".to_string(), Value::String("hello".to_string()));
 
         let result = runner.execute(&ctx).await.unwrap();
 

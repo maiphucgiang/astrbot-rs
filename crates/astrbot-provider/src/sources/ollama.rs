@@ -126,15 +126,15 @@ impl ChatProvider for OllamaProvider {
                 let mut content = String::new();
                 for line in text.lines() {
                     if let Some(data) = line.strip_prefix("data: ") {
-                                if data == "[DONE]" {
-                                    continue;
-                                }
-                                if let Ok(json) = serde_json::from_str::<Value>(data) {
-                                    if let Some(c) = json["response"].as_str() {
-                                        content.push_str(c);
-                                    }
-                                }
+                        if data == "[DONE]" {
+                            continue;
+                        }
+                        if let Ok(json) = serde_json::from_str::<Value>(data) {
+                            if let Some(c) = json["response"].as_str() {
+                                content.push_str(c);
                             }
+                        }
+                    }
                 }
                 Ok(content)
             }
@@ -188,7 +188,10 @@ mod tests {
             extra_headers: None,
         });
         let messages = vec![ChatMessage::user("Say hello")];
-        let result = provider.chat(messages, ChatOptions::default()).await.unwrap();
+        let result = provider
+            .chat(messages, ChatOptions::default())
+            .await
+            .unwrap();
         assert_eq!(result, "Hello from Ollama");
         let _ = server.await;
     }
@@ -211,7 +214,10 @@ mod tests {
             ChatMessage::system("You are a helpful assistant."),
             ChatMessage::user("Capital of France?"),
         ];
-        let result = provider.chat(messages, ChatOptions::default()).await.unwrap();
+        let result = provider
+            .chat(messages, ChatOptions::default())
+            .await
+            .unwrap();
         assert_eq!(result, "Paris");
         let _ = server.await;
     }
@@ -238,7 +244,9 @@ mod tests {
             model: "nonexistent".to_string(),
             extra_headers: None,
         });
-        let result = provider.chat(vec![ChatMessage::user("test")], ChatOptions::default()).await;
+        let result = provider
+            .chat(vec![ChatMessage::user("test")], ChatOptions::default())
+            .await;
         assert!(result.is_err());
         let _ = server.await;
     }
@@ -317,7 +325,10 @@ mod tests {
             max_tokens: None,
             model: None,
         };
-        let _ = provider.chat(vec![ChatMessage::user("hi")], opts).await.unwrap();
+        let _ = provider
+            .chat(vec![ChatMessage::user("hi")], opts)
+            .await
+            .unwrap();
         let _ = server.await;
     }
 }

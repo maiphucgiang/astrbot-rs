@@ -335,7 +335,9 @@ impl Tool for WebSearchTool {
         let query = arguments
             .get("query")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| AstrBotError::Validation("Missing required parameter: query".to_string()))?;
+            .ok_or_else(|| {
+                AstrBotError::Validation("Missing required parameter: query".to_string())
+            })?;
 
         let max_results = arguments
             .get("max_results")
@@ -493,8 +495,14 @@ mod tests {
         let def = tool.definition();
         assert_eq!(def.name, "web_search");
         assert_eq!(def.parameters.len(), 2);
-        assert!(def.parameters.iter().any(|p| p.name == "query" && p.required));
-        assert!(def.parameters.iter().any(|p| p.name == "max_results" && !p.required));
+        assert!(def
+            .parameters
+            .iter()
+            .any(|p| p.name == "query" && p.required));
+        assert!(def
+            .parameters
+            .iter()
+            .any(|p| p.name == "max_results" && !p.required));
     }
 
     #[tokio::test]
@@ -516,7 +524,10 @@ mod tests {
     async fn test_web_search_tool_missing_query_param() {
         let tool = WebSearchTool::with_brave("invalid-key-for-test");
         let result = tool.execute(&serde_json::json!({"max_results": 3})).await;
-        assert!(result.is_err(), "Expected validation error for missing query");
+        assert!(
+            result.is_err(),
+            "Expected validation error for missing query"
+        );
     }
 
     #[test]

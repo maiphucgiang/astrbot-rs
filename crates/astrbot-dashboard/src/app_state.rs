@@ -1,12 +1,12 @@
-use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use crate::log_buffer::LogBuffer;
+use crate::log_stream::LogBroadcaster;
+use crate::sse::SseBroadcaster;
 use astrbot_core::config::AstrBotConfig;
+use astrbot_persona::PersonaManager;
 use astrbot_plugin::PluginManager;
 use astrbot_provider::client::ProviderManager;
-use astrbot_persona::PersonaManager;
-use crate::sse::SseBroadcaster;
-use crate::log_stream::LogBroadcaster;
-use crate::log_buffer::LogBuffer;
+use std::sync::Arc;
+use tokio::sync::{Mutex, RwLock};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -99,7 +99,10 @@ impl AppState {
         self
     }
 
-    pub fn with_persona_registry(mut self, pr: Arc<astrbot_core::persona::PersonaRegistry>) -> Self {
+    pub fn with_persona_registry(
+        mut self,
+        pr: Arc<astrbot_core::persona::PersonaRegistry>,
+    ) -> Self {
         self.persona_registry = Some(pr);
         self
     }
@@ -114,7 +117,10 @@ impl AppState {
         self
     }
 
-    pub fn with_agent_registry(mut self, ar: Arc<RwLock<astrbot_core::agent::AgentRegistry>>) -> Self {
+    pub fn with_agent_registry(
+        mut self,
+        ar: Arc<RwLock<astrbot_core::agent::AgentRegistry>>,
+    ) -> Self {
         self.agent_registry = Some(ar);
         self
     }
@@ -134,7 +140,10 @@ impl AppState {
         self
     }
 
-    pub fn with_metrics_collector(mut self, mc: Arc<Mutex<astrbot_core::metrics::MetricsCollector>>) -> Self {
+    pub fn with_metrics_collector(
+        mut self,
+        mc: Arc<Mutex<astrbot_core::metrics::MetricsCollector>>,
+    ) -> Self {
         self.metrics_collector = Some(mc);
         self
     }

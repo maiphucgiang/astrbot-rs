@@ -146,10 +146,9 @@ impl BaiduContentSafety {
             )));
         }
 
-        let payload: BaiduTokenResponse = response
-            .json()
-            .await
-            .map_err(|e| AstrBotError::Serialization(format!("Baidu OAuth JSON parse error: {}", e)))?;
+        let payload: BaiduTokenResponse = response.json().await.map_err(|e| {
+            AstrBotError::Serialization(format!("Baidu OAuth JSON parse error: {}", e))
+        })?;
 
         if let Some(err) = payload.error {
             return Err(AstrBotError::Internal(format!(
@@ -176,7 +175,8 @@ impl BaiduContentSafety {
         }
 
         let token = self.ensure_token().await?;
-        let url = "https://aip.baidubce.com/rest/2.0/solution/v1/text_censor/v2/user_defined".to_string();
+        let url =
+            "https://aip.baidubce.com/rest/2.0/solution/v1/text_censor/v2/user_defined".to_string();
 
         let body = BaiduCensorRequest {
             text: text.to_string(),
@@ -202,10 +202,9 @@ impl BaiduContentSafety {
             )));
         }
 
-        let payload: BaiduCensorResponse = response
-            .json()
-            .await
-            .map_err(|e| AstrBotError::Serialization(format!("Baidu censor JSON parse error: {}", e)))?;
+        let payload: BaiduCensorResponse = response.json().await.map_err(|e| {
+            AstrBotError::Serialization(format!("Baidu censor JSON parse error: {}", e))
+        })?;
 
         // error_code handling
         if let Some(code) = payload.error_code {
@@ -249,12 +248,10 @@ impl BaiduContentSafety {
                     strategy: self.name.clone(),
                 })
             }
-            Some("疑似") | Some("3") => {
-                Ok(SafetyResult::Violation {
-                    reason: "Content flagged as suspicious by Baidu moderation".to_string(),
-                    strategy: self.name.clone(),
-                })
-            }
+            Some("疑似") | Some("3") => Ok(SafetyResult::Violation {
+                reason: "Content flagged as suspicious by Baidu moderation".to_string(),
+                strategy: self.name.clone(),
+            }),
             Some("审核失败") | Some("4") => Ok(SafetyResult::Error {
                 message: "Baidu moderation audit failed".to_string(),
             }),
@@ -293,21 +290,13 @@ mod tests {
 
     #[test]
     fn test_baidu_safety_creation() {
-        let safety = BaiduContentSafety::new(
-            "baidu",
-            "test-client-id",
-            "test-client-secret",
-        );
+        let safety = BaiduContentSafety::new("baidu", "test-client-id", "test-client-secret");
         assert_eq!(safety.name(), "baidu");
     }
 
     #[tokio::test]
     async fn test_baidu_empty_text_safe() {
-        let safety = BaiduContentSafety::new(
-            "baidu",
-            "test-client-id",
-            "test-client-secret",
-        );
+        let safety = BaiduContentSafety::new("baidu", "test-client-id", "test-client-secret");
         let chain = MessageChain::new();
         let result = safety.check(&chain).await;
         assert_eq!(result, SafetyResult::Safe);
