@@ -13,10 +13,11 @@ use astrbot_provider::{
 };
 use axum::{
     extract::ws::{Message as WsMessage, WebSocket},
-    extract::{Path, Query, State, WebSocketUpgrade},
+    extract::{Multipart, Path, Query, State, WebSocketUpgrade},
     routing::{delete, get, post},
     Json, Router,
 };
+use astrbot_core::metrics::StatsAggregator;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -93,7 +94,11 @@ fn build_router(state: AppState) -> Router {
         .route("/api/knowledge-base/:id", delete(delete_kb_doc))
         .route("/api/login", post(login_handler))
         .route("/api/logout", post(logout_handler))
+        .route("/api/upload", post(upload_file))
+        .route("/uploads/:uuid", get(serve_upload))
+        .route("/api/stats/aggregated", get(get_stats_aggregated))
         .route("/ws/chat", get(chat_ws_handler))
+        .merge(crate::workflow_api::create_workflow_router())
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             jwt_middleware,
@@ -825,6 +830,71 @@ async fn get_logs(State(state): State<AppState>) -> Json<Value> {
         None => vec![],
     };
     Json(json!({"logs": logs}))
+}
+
+async fn upload_file(mut multipart: Multipart) -> Json<Value> {
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "file" {
+            let filename = field.file_name().unwrap_or("unknown").to_string();
+            let data = match field.bytes().await {
+                Ok(b) => b,
+                Err(e) => return Json(json!({"success": false, "error": e.to_string()})),
+            };
+            let upload_dir = std::path::Path::new("data/uploads");
+            if let Err(e) = tokio::fs::create_dir_all(upload_dir).await {
+                return Json(json!({"success": false, "error": format!("Create dir failed: {}", e)}));
+            }
+            let file_uuid = uuid::Uuid::new_v4().to_string();
+            let file_path = upload_dir.join(&file_uuid);
+            if let Err(e) = tokio::fs::write(&file_path, &data).await {
+                return Json(json!({"success": false, "error": format!("Write failed: {}", e)}));
+            }
+            return Json(json!({
+                "success": true,
+                "url": format!("/uploads/{}", file_uuid),
+                "filename": filename,
+                "size": data.len()
+            }));
+        }
+    }
+    Json(json!({"success": false, "error": "No file field found"}))
+}
+
+async fn serve_upload(Path(uuid): Path<String>) -> impl axum::response::IntoResponse {
+    let path = format!("data/uploads/{}", uuid);
+    match tokio::fs::read(&path).await {
+        Ok(bytes) => {
+            axum::response::Response::builder()
+                .header("content-type", "application/octet-stream")
+                .body(axum::body::Body::from(bytes))
+                .unwrap()
+        }
+        Err(_) => {
+            axum::response::Response::builder()
+                .status(404)
+                .body(axum::body::Body::from("Not found"))
+                .unwrap()
+        }
+    }
+}
+
+use astrbot_core::metrics::StatsAggregator;
+
+async fn get_stats_aggregated(State(state): State<AppState>) -> Json<Value> {
+    let uptime = state.start_time.elapsed().as_secs();
+    let json = if let Some(ref mc) = state.metrics_collector {
+        let mut lock = mc.lock().await;
+        StatsAggregator::aggregate_json(&mut *lock, uptime)
+    } else {
+        json!({
+            "messages_per_hour": 0.0,
+            "top_platforms": [],
+            "provider_success_rate": [],
+            "note": "metrics collector not initialized"
+        })
+    };
+    Json(json)
 }
 
 async fn chat_ws_handler(

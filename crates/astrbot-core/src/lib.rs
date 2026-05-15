@@ -34,6 +34,7 @@ pub mod vector_store;
 pub mod voice;
 pub mod wasm;
 pub mod webhook;
+pub mod workflow;
 
 pub use config::*;
 pub use errors::*;
