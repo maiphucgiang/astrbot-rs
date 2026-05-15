@@ -291,3 +291,6 @@ mod tests {
         assert_eq!(m.counter("provider.anthropic.total").value(), 1);
     }
 }
+
+pub mod aggregator;
+pub use aggregator::{AggregatedStats, PlatformStat, ProviderStat, StatsAggregator};

@@ -6,6 +6,7 @@ pub mod log_buffer;
 pub mod log_stream;
 pub mod server;
 pub mod sse;
+pub mod workflow_api;
 pub use app_state::AppState;
 pub use log_buffer::{LogBuffer, LogCaptureLayer, LogEntry};
 pub use server::start_server;

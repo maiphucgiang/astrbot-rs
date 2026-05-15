@@ -33,6 +33,7 @@ pub struct AppState {
     pub safety_engine: Option<Arc<astrbot_core::safety::SafetyEngine>>,
     pub metrics_collector: Option<Arc<Mutex<astrbot_core::metrics::MetricsCollector>>>,
     pub kb_manager: Option<Arc<astrbot_core::kb::manager::KbManager>>,
+    pub workflow_registry: Option<Arc<crate::workflow_api::WorkflowRegistry>>,
 }
 
 impl AppState {
@@ -65,6 +66,7 @@ impl AppState {
             safety_engine: None,
             metrics_collector: None,
             kb_manager: None,
+            workflow_registry: Some(Arc::new(crate::workflow_api::WorkflowRegistry::new())),
         }
     }
 
