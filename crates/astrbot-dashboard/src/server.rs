@@ -3,6 +3,7 @@ use crate::api::{
     get_enhanced_status, update_config_with_broadcast,
 };
 use crate::app_state::AppState;
+use crate::cron_api::{create_cron_job, delete_cron_job, list_cron_jobs};
 use crate::jwt::{jwt_middleware, login_handler, logout_handler};
 use crate::kb_api::{delete_kb_doc, index_kb, list_kb_collections, search_kb};
 use astrbot_core::config::AstrBotConfig;
@@ -92,6 +93,8 @@ fn build_router(state: AppState) -> Router {
         .route("/api/knowledge-base/search", post(search_kb))
         .route("/api/knowledge-base/index", post(index_kb))
         .route("/api/knowledge-base/:id", delete(delete_kb_doc))
+        .route("/api/cron/jobs", get(list_cron_jobs).post(create_cron_job))
+        .route("/api/cron/jobs/:id", delete(delete_cron_job))
         .route("/api/login", post(login_handler))
         .route("/api/logout", post(logout_handler))
         .route("/api/upload", post(upload_file))

@@ -34,6 +34,7 @@ pub struct AppState {
     pub metrics_collector: Option<Arc<Mutex<astrbot_core::metrics::MetricsCollector>>>,
     pub kb_manager: Option<Arc<astrbot_core::kb::manager::KbManager>>,
     pub workflow_registry: Option<Arc<crate::workflow_api::WorkflowRegistry>>,
+    pub cron_scheduler: Option<Arc<astrbot_core::cron::CronScheduler>>,
 }
 
 impl AppState {
@@ -67,6 +68,7 @@ impl AppState {
             metrics_collector: None,
             kb_manager: None,
             workflow_registry: Some(Arc::new(crate::workflow_api::WorkflowRegistry::new())),
+            cron_scheduler: None,
         }
     }
 
@@ -152,6 +154,11 @@ impl AppState {
 
     pub fn with_kb_manager(mut self, km: Arc<astrbot_core::kb::manager::KbManager>) -> Self {
         self.kb_manager = Some(km);
+        self
+    }
+
+    pub fn with_cron_scheduler(mut self, cs: Arc<astrbot_core::cron::CronScheduler>) -> Self {
+        self.cron_scheduler = Some(cs);
         self
     }
 
