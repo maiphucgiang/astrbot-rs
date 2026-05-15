@@ -43,9 +43,14 @@ impl StatsAggregator {
         if let Some(counters) = snapshot.get("counters").and_then(|v| v.as_object()) {
             for (key, val) in counters {
                 if let Some(platform) = key.strip_prefix("messages.") {
-                    if platform == "total" { continue; }
+                    if platform == "total" {
+                        continue;
+                    }
                     if let Some(count) = val.as_u64() {
-                        platforms.push(PlatformStat { platform: platform.to_string(), count });
+                        platforms.push(PlatformStat {
+                            platform: platform.to_string(),
+                            count,
+                        });
                     }
                 }
             }
@@ -65,8 +70,12 @@ impl StatsAggregator {
                         let metric_type = parts[1];
                         if let Some(count) = val.as_u64() {
                             match metric_type {
-                                "total" => { provider_totals.insert(provider_id.clone(), count); }
-                                "success" => { provider_successes.insert(provider_id.clone(), count); }
+                                "total" => {
+                                    provider_totals.insert(provider_id.clone(), count);
+                                }
+                                "success" => {
+                                    provider_successes.insert(provider_id.clone(), count);
+                                }
                                 _ => {}
                             }
                         }
@@ -77,12 +86,25 @@ impl StatsAggregator {
 
         for (provider, total) in provider_totals {
             let success = provider_successes.get(&provider).copied().unwrap_or(0);
-            let success_rate = if total > 0 { (success as f64 / total as f64) * 100.0 } else { 0.0 };
-            provider_stats.push(ProviderStat { provider, success_rate, success, total });
+            let success_rate = if total > 0 {
+                (success as f64 / total as f64) * 100.0
+            } else {
+                0.0
+            };
+            provider_stats.push(ProviderStat {
+                provider,
+                success_rate,
+                success,
+                total,
+            });
         }
         provider_stats.sort_by(|a, b| b.total.cmp(&a.total));
 
-        AggregatedStats { messages_per_hour, top_platforms: platforms, provider_success_rate: provider_stats }
+        AggregatedStats {
+            messages_per_hour,
+            top_platforms: platforms,
+            provider_success_rate: provider_stats,
+        }
     }
 
     pub fn aggregate_json(collector: &mut MetricsCollector, uptime_seconds: u64) -> Value {
@@ -118,7 +140,11 @@ mod tests {
         assert_eq!(stats.top_platforms[0].platform, "qq");
         assert_eq!(stats.top_platforms[0].count, 3);
         assert_eq!(stats.provider_success_rate.len(), 2);
-        let openai = stats.provider_success_rate.iter().find(|p| p.provider == "openai").unwrap();
+        let openai = stats
+            .provider_success_rate
+            .iter()
+            .find(|p| p.provider == "openai")
+            .unwrap();
         assert_eq!(openai.total, 3);
         assert_eq!(openai.success, 2);
         assert!((openai.success_rate - 66.6667).abs() < 0.1);

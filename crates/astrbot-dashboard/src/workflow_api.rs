@@ -1,14 +1,14 @@
+use astrbot_core::workflow::{WorkflowGraph, WorkflowNode, WorkflowState};
 use axum::{
     extract::State,
     routing::{get, post},
     Json, Router,
 };
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use astrbot_core::workflow::{WorkflowGraph, WorkflowNode, WorkflowState};
-use chrono::Utc;
 
 /// A stored workflow definition with metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,9 +98,7 @@ pub struct ExecuteWorkflowRequest {
     pub workflow_id: String,
 }
 
-async fn list_workflows(
-    State(state): State<crate::app_state::AppState>,
-) -> Json<Value> {
+async fn list_workflows(State(state): State<crate::app_state::AppState>) -> Json<Value> {
     if let Some(ref registry) = state.workflow_registry {
         let workflows = registry.list().await;
         Json(json!({ "workflows": workflows }))
@@ -163,9 +161,9 @@ mod tests {
         let state = registry.execute("sample-weather").await.unwrap();
         assert!(state.completed);
         assert_eq!(state.current_node, None);
-        assert!(state.variables.contains_key("ask_output"));
-        assert!(state.variables.contains_key("search_output"));
-        assert!(state.variables.contains_key("end_output"));
+        assert!(state.variables.contains_key("ask"));
+        assert!(state.variables.contains_key("search"));
+        assert!(state.variables.contains_key("end"));
     }
 
     #[tokio::test]

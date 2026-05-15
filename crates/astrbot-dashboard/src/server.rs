@@ -6,6 +6,7 @@ use crate::app_state::AppState;
 use crate::jwt::{jwt_middleware, login_handler, logout_handler};
 use crate::kb_api::{delete_kb_doc, index_kb, list_kb_collections, search_kb};
 use astrbot_core::config::AstrBotConfig;
+use astrbot_core::metrics::StatsAggregator;
 use astrbot_core::provider::{ChatConfig, ChatMessage as CoreChatMessage};
 use astrbot_persona::{CustomPersonaRequest, PersonaManager, ReplyStyle};
 use astrbot_provider::{
@@ -17,7 +18,6 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
-use astrbot_core::metrics::StatsAggregator;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -843,7 +843,9 @@ async fn upload_file(mut multipart: Multipart) -> Json<Value> {
             };
             let upload_dir = std::path::Path::new("data/uploads");
             if let Err(e) = tokio::fs::create_dir_all(upload_dir).await {
-                return Json(json!({"success": false, "error": format!("Create dir failed: {}", e)}));
+                return Json(
+                    json!({"success": false, "error": format!("Create dir failed: {}", e)}),
+                );
             }
             let file_uuid = uuid::Uuid::new_v4().to_string();
             let file_path = upload_dir.join(&file_uuid);
@@ -864,22 +866,16 @@ async fn upload_file(mut multipart: Multipart) -> Json<Value> {
 async fn serve_upload(Path(uuid): Path<String>) -> impl axum::response::IntoResponse {
     let path = format!("data/uploads/{}", uuid);
     match tokio::fs::read(&path).await {
-        Ok(bytes) => {
-            axum::response::Response::builder()
-                .header("content-type", "application/octet-stream")
-                .body(axum::body::Body::from(bytes))
-                .unwrap()
-        }
-        Err(_) => {
-            axum::response::Response::builder()
-                .status(404)
-                .body(axum::body::Body::from("Not found"))
-                .unwrap()
-        }
+        Ok(bytes) => axum::response::Response::builder()
+            .header("content-type", "application/octet-stream")
+            .body(axum::body::Body::from(bytes))
+            .unwrap(),
+        Err(_) => axum::response::Response::builder()
+            .status(404)
+            .body(axum::body::Body::from("Not found"))
+            .unwrap(),
     }
 }
-
-use astrbot_core::metrics::StatsAggregator;
 
 async fn get_stats_aggregated(State(state): State<AppState>) -> Json<Value> {
     let uptime = state.start_time.elapsed().as_secs();
