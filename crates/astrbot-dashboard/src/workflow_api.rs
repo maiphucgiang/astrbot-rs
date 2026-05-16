@@ -1,7 +1,7 @@
 use astrbot_core::workflow::{WorkflowGraph, WorkflowNode, WorkflowState};
 use axum::{
-    extract::State,
-    routing::{get, post},
+    extract::{Path, State},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use chrono::Utc;
@@ -91,6 +91,23 @@ impl WorkflowRegistry {
 
         self.add(sample).await;
     }
+
+    pub async fn delete(&self, id: &str) -> bool {
+        let mut lock = self.workflows.write().await;
+        let original_len = lock.len();
+        lock.retain(|w| w.id != id);
+        lock.len() < original_len
+    }
+
+    pub async fn update(&self, id: &str, workflow: WorkflowDefinition) -> bool {
+        let mut lock = self.workflows.write().await;
+        if let Some(idx) = lock.iter().position(|w| w.id == id) {
+            lock[idx] = workflow;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -136,10 +153,62 @@ async fn execute_workflow(
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UpdateWorkflowRequest {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub graph: Option<WorkflowGraph>,
+}
+
+async fn delete_workflow(
+    State(state): State<crate::app_state::AppState>,
+    Path(id): Path<String>,
+) -> Json<Value> {
+    if let Some(ref registry) = state.workflow_registry {
+        let removed = registry.delete(&id).await;
+        return Json(json!({ "success": removed, "workflow_id": id }));
+    }
+    Json(json!({ "success": false, "error": "workflow registry not initialized" }))
+}
+
+async fn update_workflow(
+    State(state): State<crate::app_state::AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<UpdateWorkflowRequest>,
+) -> Json<Value> {
+    if let Some(ref registry) = state.workflow_registry {
+        let mut workflow = match registry.get(&id).await {
+            Some(w) => w,
+            None => {
+                return Json(json!({
+                    "success": false,
+                    "error": format!("workflow '{}' not found", id),
+                }))
+            }
+        };
+        if let Some(name) = req.name {
+            workflow.name = name;
+        }
+        if let Some(desc) = req.description {
+            workflow.description = Some(desc);
+        }
+        if let Some(graph) = req.graph {
+            workflow.graph = graph;
+        }
+        let updated = registry.update(&id, workflow).await;
+        return Json(json!({ "success": updated, "workflow_id": id }));
+    }
+    Json(json!({ "success": false, "error": "workflow registry not initialized" }))
+}
+
 pub fn create_workflow_router() -> Router<crate::app_state::AppState> {
     Router::new()
         .route("/api/workflows/list", get(list_workflows))
         .route("/api/workflows/execute", post(execute_workflow))
+        .route(
+            "/api/workflows/:id",
+            delete(delete_workflow).put(update_workflow),
+        )
 }
 
 #[cfg(test)]
@@ -171,5 +240,49 @@ mod tests {
         let registry = Arc::new(WorkflowRegistry::new());
         let result = registry.execute("non-existent").await;
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_delete_workflow() {
+        let registry = Arc::new(WorkflowRegistry::new());
+        registry.seed_sample().await;
+        assert!(registry.delete("sample-weather").await);
+        assert_eq!(registry.list().await.len(), 0);
+        assert!(!registry.delete("non-existent").await);
+    }
+
+    #[tokio::test]
+    async fn test_update_workflow() {
+        let registry = Arc::new(WorkflowRegistry::new());
+        registry.seed_sample().await;
+        let updated = registry
+            .update(
+                "sample-weather",
+                WorkflowDefinition {
+                    id: "sample-weather".to_string(),
+                    name: "Updated".to_string(),
+                    description: Some("new desc".to_string()),
+                    graph: WorkflowGraph::new(),
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                },
+            )
+            .await;
+        assert!(updated);
+        let w = registry.get("sample-weather").await.unwrap();
+        assert_eq!(w.name, "Updated");
+        assert!(
+            !registry
+                .update(
+                    "non-existent",
+                    WorkflowDefinition {
+                        id: "x".to_string(),
+                        name: "x".to_string(),
+                        description: None,
+                        graph: WorkflowGraph::new(),
+                        created_at: chrono::Utc::now().to_rfc3339(),
+                    }
+                )
+                .await
+        );
     }
 }
