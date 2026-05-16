@@ -13,7 +13,7 @@ impl ProviderRegistry {
         };
 
         registry.register("openai", |c| {
-            Box::new(crate::OpenAiCompatibleProvider::new(c))
+            Box::new(crate::sources::openai::OpenAiChatProvider::new(c))
         });
         registry.register("moonshot", |c| {
             Box::new(crate::sources::moonshot::create(c.api_key, c.model))

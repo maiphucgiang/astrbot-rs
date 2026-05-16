@@ -188,7 +188,9 @@ async fn cmd_run(
         if !provider_cfg.enabled {
             continue;
         }
-        if provider_cfg.provider_type == "openai_compatible" {
+        if provider_cfg.provider_type == "openai"
+            || provider_cfg.provider_type == "openai_compatible"
+        {
             runtime.register_openai_provider(
                 &provider_cfg.id,
                 provider_cfg.api_key.as_deref().unwrap_or(""),
