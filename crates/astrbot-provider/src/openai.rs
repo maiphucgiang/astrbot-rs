@@ -2,9 +2,11 @@ use astrbot_core::errors::{AstrBotError, Result};
 use astrbot_core::provider::{
     ChatConfig, ChatMessage, ChatResponse, ChatStreamChunk, ModelInfo, Provider, TokenUsage,
 };
+use astrbot_core::tools::ToolCall;
 use async_trait::async_trait;
 use futures_util::Stream;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// OpenAI-compatible provider
 pub struct OpenAiProvider {
@@ -36,20 +38,28 @@ impl OpenAiProvider {
 #[derive(Debug, Serialize)]
 struct OpenAIRequest {
     model: String,
-    messages: Vec<OpenAIMessage>,
+    messages: Vec<OpenAIRequestMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Value>,
     stream: bool,
 }
 
 #[derive(Debug, Serialize)]
-struct OpenAIMessage {
+struct OpenAIRequestMessage {
     role: String,
     content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_calls: Option<Vec<Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -61,12 +71,29 @@ struct OpenAIResponse {
 
 #[derive(Debug, Deserialize)]
 struct OpenAIChoice {
-    message: OpenAIChoiceMessage,
+    message: OpenAIResponseMessage,
 }
 
 #[derive(Debug, Deserialize)]
-struct OpenAIChoiceMessage {
-    content: String,
+struct OpenAIResponseMessage {
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<OpenAIToolCall>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIToolCall {
+    id: String,
+    #[serde(rename = "type")]
+    call_type: String,
+    function: OpenAIToolFunction,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIToolFunction {
+    name: String,
+    arguments: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -89,7 +116,25 @@ struct OpenAIStreamChoice {
 
 #[derive(Debug, Deserialize)]
 struct OpenAIStreamDelta {
+    #[serde(default)]
     content: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<OpenAIStreamToolCall>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIStreamToolCall {
+    index: usize,
+    id: Option<String>,
+    #[serde(rename = "type")]
+    call_type: Option<String>,
+    function: Option<OpenAIStreamToolFunction>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIStreamToolFunction {
+    name: Option<String>,
+    arguments: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -119,13 +164,38 @@ impl Provider for OpenAiProvider {
 
     async fn chat(&self, messages: Vec<ChatMessage>, config: ChatConfig) -> Result<ChatResponse> {
         let model = config.model.unwrap_or_else(|| self.default_model.clone());
-        let req_messages: Vec<OpenAIMessage> = messages
+
+        // Convert ChatMessage to OpenAI request messages (preserve tool_calls / tool_call_id)
+        let req_messages: Vec<OpenAIRequestMessage> = messages
             .into_iter()
-            .map(|m| OpenAIMessage {
-                role: m.role,
-                content: m.content,
+            .map(|m| {
+                let tool_calls = m.tool_calls.map(|calls| {
+                    calls
+                        .into_iter()
+                        .map(|tc| {
+                            serde_json::json!({
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.name,
+                                    "arguments": tc.arguments.to_string(),
+                                }
+                            })
+                        })
+                        .collect::<Vec<Value>>()
+                });
+                OpenAIRequestMessage {
+                    role: m.role,
+                    content: m.content,
+                    name: m.name,
+                    tool_calls,
+                    tool_call_id: m.tool_call_id,
+                }
             })
             .collect();
+
+        // Extract tools from ChatConfig.extra if present
+        let tools = config.extra.get("tools").cloned();
 
         let request = OpenAIRequest {
             model,
@@ -133,6 +203,7 @@ impl Provider for OpenAiProvider {
             temperature: config.temperature,
             max_tokens: config.max_tokens,
             top_p: config.top_p,
+            tools,
             stream: false,
         };
 
@@ -159,12 +230,28 @@ impl Provider for OpenAiProvider {
             AstrBotError::Serialization(format!("Failed to parse OpenAI response: {}", e))
         })?;
 
-        let content = resp
-            .choices
-            .into_iter()
-            .next()
-            .map(|c| c.message.content)
-            .unwrap_or_default();
+        let choice = resp.choices.into_iter().next();
+        let (content, tool_calls) = match choice {
+            Some(c) => {
+                let msg = c.message;
+                let content = msg.content.unwrap_or_default();
+                let tool_calls = msg.tool_calls.map(|tcs| {
+                    tcs.into_iter()
+                        .map(|tc| {
+                            let args =
+                                serde_json::from_str(&tc.function.arguments).unwrap_or(Value::Null);
+                            ToolCall {
+                                id: tc.id,
+                                name: tc.function.name,
+                                arguments: args,
+                            }
+                        })
+                        .collect::<Vec<ToolCall>>()
+                });
+                (content, tool_calls)
+            }
+            None => (String::new(), None),
+        };
 
         Ok(ChatResponse {
             content,
@@ -175,7 +262,7 @@ impl Provider for OpenAiProvider {
                 total_tokens: resp.usage.total_tokens,
             }),
             reasoning: None,
-            tool_calls: None,
+            tool_calls,
         })
     }
 
@@ -185,13 +272,36 @@ impl Provider for OpenAiProvider {
         config: ChatConfig,
     ) -> Result<Box<dyn Stream<Item = Result<ChatStreamChunk>> + Send>> {
         let model = config.model.unwrap_or_else(|| self.default_model.clone());
-        let req_messages: Vec<OpenAIMessage> = messages
+
+        let req_messages: Vec<OpenAIRequestMessage> = messages
             .into_iter()
-            .map(|m| OpenAIMessage {
-                role: m.role,
-                content: m.content,
+            .map(|m| {
+                let tool_calls = m.tool_calls.map(|calls| {
+                    calls
+                        .into_iter()
+                        .map(|tc| {
+                            serde_json::json!({
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.name,
+                                    "arguments": tc.arguments.to_string(),
+                                }
+                            })
+                        })
+                        .collect::<Vec<Value>>()
+                });
+                OpenAIRequestMessage {
+                    role: m.role,
+                    content: m.content,
+                    name: m.name,
+                    tool_calls,
+                    tool_call_id: m.tool_call_id,
+                }
             })
             .collect();
+
+        let tools = config.extra.get("tools").cloned();
 
         let request = OpenAIRequest {
             model,
@@ -199,6 +309,7 @@ impl Provider for OpenAiProvider {
             temperature: config.temperature,
             max_tokens: config.max_tokens,
             top_p: config.top_p,
+            tools,
             stream: true,
         };
 
@@ -363,5 +474,206 @@ impl Provider for OpenAiProvider {
             Ok(resp) => Ok(resp.status().is_success()),
             Err(_) => Ok(false),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_provider() -> OpenAiProvider {
+        OpenAiProvider::new(
+            "test-openai".to_string(),
+            "sk-test".to_string(),
+            "https://api.openai.com".to_string(),
+            "gpt-4o".to_string(),
+        )
+    }
+
+    #[test]
+    fn test_openai_provider_new() {
+        let provider = test_provider();
+        assert_eq!(provider.id(), "test-openai");
+        assert_eq!(provider.name(), "test-openai");
+    }
+
+    #[test]
+    fn test_openai_auth_header() {
+        let provider = test_provider();
+        assert_eq!(provider.auth_header(), "Bearer sk-test");
+    }
+
+    #[test]
+    fn test_openai_models_list() {
+        let provider = test_provider();
+        let models = tokio_test::block_on(provider.models()).unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0], "gpt-4o");
+    }
+
+    #[test]
+    fn test_openai_model_info_gpt4o() {
+        let provider = test_provider();
+        let info = tokio_test::block_on(provider.model_info("gpt-4o")).unwrap();
+        assert_eq!(info.name, "gpt-4o");
+        assert_eq!(info.context_length, 128000);
+        assert!(info.supports_streaming);
+        assert!(info.supports_vision);
+        assert!(info.supports_function_calling);
+    }
+
+    #[test]
+    fn test_openai_model_info_gpt35() {
+        let provider = test_provider();
+        let info = tokio_test::block_on(provider.model_info("gpt-3.5-turbo")).unwrap();
+        assert_eq!(info.name, "gpt-3.5-turbo");
+        assert_eq!(info.context_length, 16385);
+        assert!(info.supports_function_calling);
+    }
+
+    #[test]
+    fn test_openai_model_info_unknown() {
+        let provider = test_provider();
+        let info = tokio_test::block_on(provider.model_info("unknown-model")).unwrap();
+        assert_eq!(info.context_length, 4096);
+        assert!(!info.supports_vision);
+    }
+
+    #[test]
+    fn test_openai_request_message_serialization() {
+        let msg = OpenAIRequestMessage {
+            role: "user".to_string(),
+            content: "Hello".to_string(),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"role\":\"user\""));
+        assert!(json.contains("\"content\":\"Hello\""));
+        assert!(!json.contains("tool_calls"));
+    }
+
+    #[test]
+    fn test_openai_request_message_with_tool_calls() {
+        let msg = OpenAIRequestMessage {
+            role: "assistant".to_string(),
+            content: "".to_string(),
+            name: None,
+            tool_calls: Some(vec![serde_json::json!({
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "echo",
+                    "arguments": "{\"text\":\"hi\"}"
+                }
+            })]),
+            tool_call_id: None,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("call_1"));
+        assert!(json.contains("echo"));
+    }
+
+    #[test]
+    fn test_openai_response_message_deserialization() {
+        let json = r#"{"content":"Hello","tool_calls":null}"#;
+        let msg: OpenAIResponseMessage = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.content, Some("Hello".to_string()));
+        assert!(msg.tool_calls.is_none());
+    }
+
+    #[test]
+    fn test_openai_response_message_with_tool_calls() {
+        let json = r#"{
+            "content":null,
+            "tool_calls":[
+                {
+                    "id":"call_abc123",
+                    "type":"function",
+                    "function":{"name":"get_weather","arguments":"{\"location\":\"NYC\"}"}
+                }
+            ]
+        }"#;
+        let msg: OpenAIResponseMessage = serde_json::from_str(json).unwrap();
+        assert!(msg.content.is_none());
+        let tcs = msg.tool_calls.unwrap();
+        assert_eq!(tcs.len(), 1);
+        assert_eq!(tcs[0].id, "call_abc123");
+        assert_eq!(tcs[0].function.name, "get_weather");
+    }
+
+    #[test]
+    fn test_openai_stream_delta_deserialization() {
+        let json = r#"{"content":"hi","tool_calls":null}"#;
+        let delta: OpenAIStreamDelta = serde_json::from_str(json).unwrap();
+        assert_eq!(delta.content, Some("hi".to_string()));
+    }
+
+    #[test]
+    fn test_openai_request_tools_serialization() {
+        let req = OpenAIRequest {
+            model: "gpt-4o".to_string(),
+            messages: vec![OpenAIRequestMessage {
+                role: "user".to_string(),
+                content: "What's the weather?".to_string(),
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+            }],
+            temperature: Some(0.7),
+            max_tokens: Some(1024),
+            top_p: Some(1.0),
+            tools: Some(serde_json::json!([
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "description": "Get weather",
+                        "parameters": {"type": "object", "properties": {}}
+                    }
+                }
+            ])),
+            stream: false,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("get_weather"));
+        assert!(json.contains("\"stream\":false"));
+    }
+
+    #[test]
+    fn test_openai_request_skips_none_fields() {
+        let req = OpenAIRequest {
+            model: "gpt-4o".to_string(),
+            messages: vec![OpenAIRequestMessage {
+                role: "user".to_string(),
+                content: "Hi".to_string(),
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+            }],
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            tools: None,
+            stream: false,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(!json.contains("temperature"));
+        assert!(!json.contains("max_tokens"));
+        assert!(!json.contains("tools"));
+    }
+
+    #[test]
+    fn test_openai_health_check_unavailable() {
+        let provider = OpenAiProvider::new(
+            "test".to_string(),
+            "sk-invalid".to_string(),
+            "https://invalid.openai.example.com".to_string(),
+            "gpt-4o".to_string(),
+        );
+        let result = tokio_test::block_on(provider.health_check());
+        assert!(result.is_ok());
+        assert!(!result.unwrap());
     }
 }

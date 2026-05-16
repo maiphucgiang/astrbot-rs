@@ -14,6 +14,7 @@ pub mod minimax;
 pub mod moonshot;
 pub mod ollama;
 pub mod oneapi;
+pub mod openai;
 pub mod openrouter;
 pub mod perplexity;
 pub mod qwen;
